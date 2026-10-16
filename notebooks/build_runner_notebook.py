@@ -61,9 +61,25 @@ def quiet_logs():
             lg.propagate = False; lg.handlers.clear()
 quiet_logs()
 
-WHEELHOUSE_DIR = Path('/kaggle/input/datasets/metric/gemma-4-developer-agent-wheelhouse')
-if not WHEELHOUSE_DIR.exists():
-    WHEELHOUSE_DIR = next((Path(p) for p in glob.glob('/kaggle/input/**/gemma-4-developer-agent-wheelhouse', recursive=True)), WHEELHOUSE_DIR)
+def find_wheelhouse():
+    \"\"\"The harness wheelhouse is the folder holding the swegemma / adk_submission / vllm wheels.
+    (Not the competition's own wheels/ folder, which only has the repos' test dependencies.)\"\"\"
+    default = Path('/kaggle/input/datasets/metric/gemma-4-developer-agent-wheelhouse')
+    if any(default.glob('*.whl')):
+        return default
+    for pat in ('swegemma*.whl', 'adk_submission*.whl', 'adk-submission*.whl', 'vllm*.whl'):
+        hits = glob.glob(f'/kaggle/input/**/{pat}', recursive=True)
+        if hits:
+            return Path(hits[0]).parent
+    return None
+
+WHEELHOUSE_DIR = find_wheelhouse()
+if WHEELHOUSE_DIR is None:
+    print('Attached inputs:')
+    for p in sorted(glob.glob('/kaggle/input/*/*')) + sorted(glob.glob('/kaggle/input/*/*/*')):
+        print('  ', p)
+    raise SystemExit('Harness wheelhouse not found. Add Input -> Datasets -> search '
+                     '"gemma-4-developer-agent-wheelhouse" (owner: metric), attach it, then rerun this cell.')
 for pat in ('/usr/local/lib/python*/dist-packages/*cutlass*.pth', '/usr/local/lib/python*/site-packages/*cutlass*.pth'):
     for pth in glob.glob(pat):
         try: os.unlink(pth)
