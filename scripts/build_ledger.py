@@ -196,6 +196,10 @@ def summarize(df: pd.DataFrame) -> str:
         vc = d["failure_type"].value_counts()
         for k, v in vc.items():
             out.append(f"  {k:20s} {v:4d}  {v / n:6.1%}")
+        secs = pd.to_numeric(d["duration_s"], errors="coerce").dropna()
+        if len(secs):
+            out.append(f"  seconds per task: median {secs.median():.0f}, p90 {secs.quantile(0.9):.0f}, "
+                       f"total {secs.sum() / 3600:.2f} h")
         grp = d["failure_group"].value_counts()
         out.append("  -- by group: " + ", ".join(f"{k} {v / n:.1%}" for k, v in grp.items()))
         finished = d[d["failure_group"].isin(["resolved", "skill"])]

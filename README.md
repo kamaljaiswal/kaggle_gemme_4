@@ -66,7 +66,8 @@ python tests/test_scripts.py
 L4 sessions have internet off, so the notebook cannot `git clone`. Zip this repo, upload it as a
 private Kaggle Dataset, and attach it with the competition data, the Gemma 4 model and the
 `gemma-4-developer-agent-wheelhouse` dataset. Then open `notebooks/kaggle_runner.ipynb`, set
-`BUNDLE_NAME` and `MODE` in the first cell, and run all. Details are in the notebook's first cell.
+`BUNDLES` (one or several bundle folders) and `MODE` in the first cell, and run all. With several bundles and
+`REPEATS = 2`, one GPU session compares them on the same tasks and prints a comparison table at the end. Details are in the notebook's first cell.
 
 ## What is verified and what is not
 

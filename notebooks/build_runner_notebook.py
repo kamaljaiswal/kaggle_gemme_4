@@ -20,7 +20,8 @@ and writes results the ledger script can read. Use it **before** submitting.
 2. New notebook → *Add Input*: the competition data, the Gemma 4 model you want, the
    `gemma-4-developer-agent-wheelhouse` dataset (as in the official starter), and your repo dataset.
 3. Accelerator: **GPU L4×4**. Internet: **off** (required for L4).
-4. Edit the config cell, then *Run All*.
+4. Edit the config cell, then *Run All*. To compare bundles, list several in `BUNDLES` and set `REPEATS`:
+   they run one after another on the same tasks in a single session (one model load).
 
 **Modes**
 - `smoke`: 3 tasks. Checks the bundle loads, tools work and a patch comes out (~10 min).
@@ -28,14 +29,15 @@ and writes results the ledger script can read. Use it **before** submitting.
 - `ids`: the ids you list in `TASK_IDS`.
 - `all`: every task (~6.5 h for 129 tasks at ~3 min each; keep an eye on your GPU quota).
 
-Results go to `/kaggle/working/results/<RUN_ID>/`. Download `results_<RUN_ID>.zip` at the end.
+Results go to `/kaggle/working/results/<RUN_ID>/`. Download `results_<SESSION>.zip` at the end, **before stopping the session**.
 """),
 (CODE, """# ---------------- CONFIG: the only cell you need to edit ----------------
-BUNDLE_NAME = "v3_overflow_fix"     # folder under bundles/
+BUNDLES = ["v3_overflow_fix"]       # one or more folders under bundles/. Several = compared in ONE GPU session (same base model)
 MODE = "smoke"                      # smoke | pilot | ids | all
 TASK_IDS = []                       # used when MODE == "ids"
+REPEATS = 1                         # runs of every bundle on the same tasks (2+ shows run-to-run noise)
 MODEL_OVERRIDE = None               # e.g. "gemma-4-12b-it-qat-w4a16-ct" to test another size (changes the bundle id)
-RUN_ID = None                       # None -> <bundle>_<mode>_<timestamp>
+RUN_ID = None                       # None -> <bundle>_<mode>_<timestamp>[_rN]; only used when there is a single run
 STOP_AFTER_HOURS = 11.0             # stop starting new tasks after this much wall time
 REPO_DIR = None                     # None -> auto-detect the uploaded repo under /kaggle/input
 """),
@@ -102,32 +104,51 @@ print('ok')
 (CODE, """DATA_DIR = Path('/kaggle/input/competitions/gemma-4-developer-agent')
 WORK = Path('/kaggle/working')
 
+BUNDLE_LIST = list(globals().get('BUNDLES') or [])
+if not BUNDLE_LIST and globals().get('BUNDLE_NAME'):          # old single-bundle config still works
+    BUNDLE_LIST = [BUNDLE_NAME]
+assert BUNDLE_LIST, 'Set BUNDLES in the config cell.'
+
 if REPO_DIR is None:
     hits = [Path(p).parent for p in glob.glob('/kaggle/input/**/scripts/validate_bundle.py', recursive=True)]
     assert hits, 'Repo dataset not found under /kaggle/input. Attach it or set REPO_DIR.'
     REPO_DIR = hits[0].parent
 REPO_DIR = Path(REPO_DIR)
-SRC_BUNDLE = REPO_DIR / 'bundles' / BUNDLE_NAME
-assert SRC_BUNDLE.is_dir(), f'bundle not found: {SRC_BUNDLE}'
 
-# Work on a writable copy; the input dataset is read-only.
-AGENT_DIR = WORK / 'agent'
-shutil.rmtree(AGENT_DIR, ignore_errors=True); shutil.copytree(SRC_BUNDLE, AGENT_DIR)
-if MODEL_OVERRIDE:
-    for yp in [AGENT_DIR / 'agent.yaml', *sorted((AGENT_DIR / 'sub_agents').glob('*.yaml'))]:
-        if yp.is_file():
-            txt = re.sub(r'^(\\s*model:\\s*).*$', rf'\\g<1>{MODEL_OVERRIDE}', yp.read_text(), flags=re.M)
-            if not MODEL_OVERRIDE.startswith('gemma-4-31b'):
-                txt = re.sub(r'^\\s*adapter:\\s*.*\\n?', '', txt, flags=re.M)   # sample adapters are 31B-shaped
-            yp.write_text(txt)
+AGENT_DIR = WORK / 'agent'          # the writable copy the harness reads; the input dataset is read-only
+BUNDLE_IDS, ZIPS = {}, {}
 
-ZIP_DIR = WORK / 'zips'
-v = subprocess.run([sys.executable, str(REPO_DIR / 'scripts' / 'validate_bundle.py'), str(AGENT_DIR), '--zip', str(ZIP_DIR)],
-                   capture_output=True, text=True)
-print(v.stdout, v.stderr)
-assert v.returncode == 0, 'Bundle failed validation; fix it before spending GPU time.'
-BUNDLE_ID = re.search(r'bundle id (\\w+)', v.stdout).group(1)
-print('BUNDLE_ID =', BUNDLE_ID)
+def prepare_bundle(name, quiet=False):
+    # Copy bundles/<name> to AGENT_DIR (applying MODEL_OVERRIDE) and validate it; fails before any GPU time is spent.
+    src = REPO_DIR / 'bundles' / name
+    assert src.is_dir(), f'bundle not found: {src}'
+    shutil.rmtree(AGENT_DIR, ignore_errors=True); shutil.copytree(src, AGENT_DIR)
+    if MODEL_OVERRIDE:
+        for yp in [AGENT_DIR / 'agent.yaml', *sorted((AGENT_DIR / 'sub_agents').glob('*.yaml'))]:
+            if yp.is_file():
+                txt = re.sub(r'^(\\s*model:\\s*).*$', rf'\\g<1>{MODEL_OVERRIDE}', yp.read_text(), flags=re.M)
+                if not MODEL_OVERRIDE.startswith('gemma-4-31b'):
+                    txt = re.sub(r'^\\s*adapter:\\s*.*\\n?', '', txt, flags=re.M)   # sample adapters are 31B-shaped
+                yp.write_text(txt)
+    zdir = WORK / 'zips' / name
+    shutil.rmtree(zdir, ignore_errors=True)
+    v = subprocess.run([sys.executable, str(REPO_DIR / 'scripts' / 'validate_bundle.py'), str(AGENT_DIR), '--zip', str(zdir)],
+                       capture_output=True, text=True)
+    if not quiet:
+        print(f'--- {name} ---'); print(v.stdout, v.stderr)
+    assert v.returncode == 0, f'Bundle {name} failed validation; fix it before spending GPU time.'
+    BUNDLE_IDS[name] = re.search(r'bundle id (\\w+)', v.stdout).group(1)
+    ZIPS[name] = next(zdir.glob('*.zip'))
+
+for name in BUNDLE_LIST:
+    prepare_bundle(name)
+
+# One vLLM server serves the whole session, so every bundle must declare the same base model.
+base_models = {n: (MODEL_OVERRIDE or re.search(r'^\\s*model:\\s*(\\S+)', (REPO_DIR / 'bundles' / n / 'agent.yaml').read_text(), re.M).group(1))
+               for n in BUNDLE_LIST}
+assert len(set(base_models.values())) == 1, f'bundles use different models, run them in separate sessions: {base_models}'
+prepare_bundle(BUNDLE_LIST[0], quiet=True)    # leave the first bundle in AGENT_DIR; the server is started from it
+print('BUNDLE_IDS =', BUNDLE_IDS)
 """),
 (MD, "## 3. Choose tasks"),
 (CODE, """from swegemma.models import load_tasks
@@ -154,15 +175,8 @@ elif MODE == 'all':
 else:
     raise ValueError(MODE)
 
-RUN_ID = RUN_ID or f"{BUNDLE_NAME}_{MODE}_{datetime.now(timezone.utc):%Y%m%d_%H%M}"
-RUN_DIR = WORK / 'results' / RUN_ID
-RUN_DIR.mkdir(parents=True, exist_ok=True)
 task_hash = hashlib.sha256(TASKS_PATH.read_bytes()).hexdigest()[:12]
-meta = {'run_id': RUN_ID, 'bundle': BUNDLE_NAME, 'bundle_id': BUNDLE_ID, 'mode': MODE,
-        'model_override': MODEL_OVERRIDE, 'tasks_file_sha': task_hash, 'n_tasks': len(sel),
-        'task_ids': [t.instance_id for t in sel], 'started_utc': datetime.now(timezone.utc).isoformat()}
-(RUN_DIR / 'run_meta.json').write_text(json.dumps(meta, indent=2))
-print(f'{len(sel)} tasks -> {RUN_DIR}')
+print(f'{len(sel)} tasks selected (tasks file {task_hash})')
 """),
 (MD, "## 4. Start the model server (same settings as the scorer)"),
 (CODE, """import litellm, torch
@@ -222,28 +236,7 @@ def run_sync(fn, *args, **kwargs):
             return pool.submit(lambda: asyncio.run(call())).result()
     return asyncio.run(call())
 
-cfg_file = next((c for n in ('eval_config.yaml', 'eval_config.yml') if (c := AGENT_DIR / n).is_file()), None)
-raw = (yaml.safe_load(cfg_file.read_text()) or {}) if cfg_file else {}
-ev = raw.get('evaluation', raw)
 limits, gen_constraints = build_submission_limits()
-eval_config = EvalConfig(
-    tasks_path=TASKS_PATH, snapshots_dir=DATA_DIR / 'snapshots', results_dir=RUN_DIR / 'harness',
-    submission_dir=AGENT_DIR, models=models, sandbox='subprocess',
-    timeout_seconds=int(ev.get('timeout_seconds', 300)), verification_timeout_seconds=300,
-    max_time_minutes=float(ev.get('max_time_minutes', 60.0)), max_tool_calls=int(ev.get('max_tool_calls', 100)),
-    max_turns=int(ev['max_turns']) if ev.get('max_turns') is not None else None,
-    limits=limits, generation_constraints=gen_constraints, adapter_manifest=adapters,
-    # these two mirror the scorer (HARNESS_README section 7.2)
-    context_cache_config=ContextCacheConfig(min_tokens=2048, ttl_seconds=1800, cache_intervals=10),
-    events_compaction_config=EventsCompactionConfig(compaction_interval=15, overlap_size=2,
-                                                    token_threshold=14336, event_retention_size=5),
-    graph_dir=str(DATA_DIR / 'graphs'), embeddings_dir=str(DATA_DIR / 'embeddings'),
-    wheels_dir=DATA_DIR / 'wheels', verbose=False)
-evaluator = Evaluator(eval_config)
-
-OUT = RUN_DIR / 'runner_results.jsonl'
-done = {json.loads(l)['instance_id'] for l in OUT.read_text().splitlines() if l.strip()} if OUT.exists() else set()
-(RUN_DIR / 'patches').mkdir(exist_ok=True)
 
 def as_record(task, result, wall):
     rec = {'instance_id': task.instance_id, 'repo': task.repo, 'wall_seconds': round(wall, 1)}
@@ -257,42 +250,111 @@ def as_record(task, result, wall):
             rec[k] = v if isinstance(v, (str, int, float, bool)) or v is None else str(v)
     return rec
 
-t_start = time.time()
-for i, task in enumerate(sel, 1):
-    if task.instance_id in done:
-        continue
-    if (time.time() - t_start) / 3600 > STOP_AFTER_HOURS:
-        print('time limit reached, stopping'); break
-    t0 = time.time()
-    try:
-        result = run_sync(evaluator.evaluate_task, task=task, task_index=i, total_tasks=len(sel))
-        rec = as_record(task, result, time.time() - t0)
-    except Exception as e:
-        rec = {'instance_id': task.instance_id, 'repo': task.repo, 'resolved': False,
-               'error': f'{type(e).__name__}: {e}'[:2000], 'wall_seconds': round(time.time() - t0, 1)}
-    patch = (rec.get('agent_patch') or '').strip()
-    (RUN_DIR / 'patches' / f'{task.instance_id}.patch').write_text(patch)
-    with OUT.open('a') as f:
-        f.write(json.dumps(rec, default=str) + '\\n')
-    print(f"[{i}/{len(sel)}] {task.instance_id}: resolved={rec.get('resolved')} "
-          f"calls={rec.get('tool_calls')} {rec.get('wall_seconds')}s patch={len(patch)} "
-          f"{(rec.get('error') or rec.get('agent_error') or '')[:80]}")
-print(f'done in {(time.time() - t_start) / 60:.1f} min')
+SESSION = globals().get('SESSION') or f"{datetime.now(timezone.utc):%Y%m%d_%H%M}"   # kept on cell rerun, so a rerun resumes
+RUN_DIRS, RUN_BUNDLE_IDS = [], []
+t_start = globals().get('t_start') or time.time()
+
+def run_bundle(name, rep):
+    prepare_bundle(name, quiet=True)                  # put this bundle in AGENT_DIR
+    bid = BUNDLE_IDS[name]
+    single = len(BUNDLE_LIST) * REPEATS == 1
+    run_id = RUN_ID if (RUN_ID and single) else f"{name}_{MODE}_{SESSION}" + (f"_r{rep}" if REPEATS > 1 else "")
+    run_dir = WORK / 'results' / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / 'run_meta.json').write_text(json.dumps({
+        'run_id': run_id, 'bundle': name, 'bundle_id': bid, 'mode': MODE, 'repeat': rep,
+        'model_override': MODEL_OVERRIDE, 'tasks_file_sha': task_hash, 'n_tasks': len(sel),
+        'task_ids': [t.instance_id for t in sel], 'started_utc': datetime.now(timezone.utc).isoformat()}, indent=2))
+
+    cfg_file = next((c for n in ('eval_config.yaml', 'eval_config.yml') if (c := AGENT_DIR / n).is_file()), None)
+    raw = (yaml.safe_load(cfg_file.read_text()) or {}) if cfg_file else {}
+    ev = raw.get('evaluation', raw)
+    eval_config = EvalConfig(
+        tasks_path=TASKS_PATH, snapshots_dir=DATA_DIR / 'snapshots', results_dir=run_dir / 'harness',
+        submission_dir=AGENT_DIR, models=models, sandbox='subprocess',
+        timeout_seconds=int(ev.get('timeout_seconds', 300)), verification_timeout_seconds=300,
+        max_time_minutes=float(ev.get('max_time_minutes', 60.0)), max_tool_calls=int(ev.get('max_tool_calls', 100)),
+        max_turns=int(ev['max_turns']) if ev.get('max_turns') is not None else None,
+        limits=limits, generation_constraints=gen_constraints, adapter_manifest=adapters,
+        # these two mirror the scorer (HARNESS_README section 7.2)
+        context_cache_config=ContextCacheConfig(min_tokens=2048, ttl_seconds=1800, cache_intervals=10),
+        events_compaction_config=EventsCompactionConfig(compaction_interval=15, overlap_size=2,
+                                                        token_threshold=14336, event_retention_size=5),
+        graph_dir=str(DATA_DIR / 'graphs'), embeddings_dir=str(DATA_DIR / 'embeddings'),
+        wheels_dir=DATA_DIR / 'wheels', verbose=False)
+    evaluator = Evaluator(eval_config)
+
+    out = run_dir / 'runner_results.jsonl'
+    done = {json.loads(l)['instance_id'] for l in out.read_text().splitlines() if l.strip()} if out.exists() else set()
+    (run_dir / 'patches').mkdir(exist_ok=True)
+    print(f'===== {run_id}  bundle {bid}  {len(sel)} tasks ({len(done)} already done) =====')
+    for i, task in enumerate(sel, 1):
+        if task.instance_id in done:
+            continue
+        if (time.time() - t_start) / 3600 > STOP_AFTER_HOURS:
+            print('time limit reached, stopping'); break
+        t0 = time.time()
+        try:
+            result = run_sync(evaluator.evaluate_task, task=task, task_index=i, total_tasks=len(sel))
+            rec = as_record(task, result, time.time() - t0)
+        except Exception as e:
+            rec = {'instance_id': task.instance_id, 'repo': task.repo, 'resolved': False,
+                   'error': f'{type(e).__name__}: {e}'[:2000], 'wall_seconds': round(time.time() - t0, 1)}
+        patch = (rec.get('agent_patch') or '').strip()
+        (run_dir / 'patches' / f'{task.instance_id}.patch').write_text(patch)
+        with out.open('a') as f:
+            f.write(json.dumps(rec, default=str) + '\\n')
+        print(f"[{i}/{len(sel)}] {task.instance_id}: resolved={rec.get('resolved')} "
+              f"calls={rec.get('tool_calls')} {rec.get('wall_seconds')}s patch={len(patch)} "
+              f"{(rec.get('error') or rec.get('agent_error') or '')[:80]}")
+    # per-run ledger and trace statistics (why tasks failed)
+    r = subprocess.run([sys.executable, str(REPO_DIR / 'scripts' / 'build_ledger.py'), str(run_dir), '--bundle-id', bid,
+                        '--tasks', str(TASKS_PATH), '--results-file', 'runner_results.jsonl',
+                        '--tool-cap', str(ev.get('max_tool_calls', 100)), '--out', str(run_dir / 'ledger.csv')],
+                       capture_output=True, text=True)
+    print(r.stdout, r.stderr)
+    ts = subprocess.run([sys.executable, str(REPO_DIR / 'scripts' / 'trace_stats.py'), str(run_dir / 'harness' / 'traces'),
+                         '--out', str(run_dir / 'trace_stats.csv')], capture_output=True, text=True)
+    print(ts.stdout[-3000:], ts.stderr[-500:])
+    RUN_DIRS.append(run_dir); RUN_BUNDLE_IDS.append(bid)
+
+for rep in range(1, REPEATS + 1):                     # repeat-major order, so slow drift hits every bundle equally
+    for name in BUNDLE_LIST:
+        if (time.time() - t_start) / 3600 > STOP_AFTER_HOURS:
+            print('time limit reached, no further runs'); break
+        run_bundle(name, rep)
+print(f'all runs done in {(time.time() - t_start) / 60:.1f} min')
 """),
 (MD, "## 6. Ledger and summary"),
-(CODE, """r = subprocess.run([sys.executable, str(REPO_DIR / 'scripts' / 'build_ledger.py'), str(RUN_DIR),
-                    '--bundle-id', BUNDLE_ID, '--tasks', str(TASKS_PATH), '--results-file', 'runner_results.jsonl',
-                    '--tool-cap', str(ev.get('max_tool_calls', 100)), '--out', str(RUN_DIR / 'ledger.csv')],
-                   capture_output=True, text=True)
-print(r.stdout, r.stderr)
+(CODE, """import pandas as pd
+ALL = WORK / 'results' / f'ledger_all_{SESSION}.csv'
+r = subprocess.run([sys.executable, str(REPO_DIR / 'scripts' / 'build_ledger.py'), *map(str, RUN_DIRS),
+                    '--bundle-id', *RUN_BUNDLE_IDS, '--tasks', str(TASKS_PATH), '--results-file', 'runner_results.jsonl',
+                    '--tool-cap', '28', '--out', str(ALL)], capture_output=True, text=True)
+print(r.stdout[-6000:], r.stderr[-1500:])
+
+L = pd.read_csv(ALL)
+L['secs'] = pd.to_numeric(L['duration_s'], errors='coerce')
+L['bundle'] = L['bundle_id'].map({v: k for k, v in BUNDLE_IDS.items()})
+tab = L.groupby(['bundle', 'run_id']).agg(
+    tasks=('instance_id', 'count'), resolved=('resolved', 'sum'),
+    overflow=('failure_type', lambda s: (s == 'context_overflow').sum()),
+    timeout=('failure_type', lambda s: (s == 'timeout').sum()),
+    tests_failed=('failure_type', lambda s: (s == 'tests_failed').sum()),
+    median_s=('secs', 'median'), p90_s=('secs', lambda s: s.quantile(0.9)))
+print('\\nCOMPARISON (same tasks, one row per run)'); print(tab.round(0).to_string())
+print('\\nPER TASK (1 = resolved)')
+print(L.pivot_table(index='instance_id', columns='run_id', values='resolved', aggfunc='max').astype(int).to_string())
 """),
 (MD, """## 7. Package
 
-`submission.zip` is the validated bundle (deterministic zip). Submit it only after the pilot looks right.
-`results_<RUN_ID>.zip` holds the run outputs: download it and send it back for analysis."""),
-(CODE, """shutil.copyfile(next(ZIP_DIR.glob('*.zip')), WORK / 'submission.zip')
-arc = shutil.make_archive(str(WORK / f'results_{RUN_ID}'), 'zip', root_dir=RUN_DIR)
-print('submission:', WORK / 'submission.zip')
+`submission.zip` is the first bundle's validated zip (`submission_<bundle>.zip` for each one). Submit only after the pilot looks right.
+`results_<SESSION>.zip` holds every run's outputs and traces: download it and send it back for analysis."""),
+(CODE, """for name in BUNDLE_LIST:
+    shutil.copyfile(ZIPS[name], WORK / f'submission_{name}.zip')
+shutil.copyfile(ZIPS[BUNDLE_LIST[0]], WORK / 'submission.zip')     # with several bundles, submit the one you choose
+arc = shutil.make_archive(str(WORK / f'results_{SESSION}'), 'zip', root_dir=WORK / 'results')
+print('submission (first bundle):', WORK / 'submission.zip', '| per bundle:', [f'submission_{n}.zip' for n in BUNDLE_LIST])
 print('results   :', arc)
 try:
     server_instance.stop()
