@@ -304,8 +304,8 @@ except Exception:
 
 def build() -> dict:
     cells = []
-    for kind, src in CELLS:
-        cell = {"cell_type": kind, "metadata": {}, "source": src.strip("\n").splitlines(keepends=True)}
+    for n, (kind, src) in enumerate(CELLS):
+        cell = {"cell_type": kind, "id": f"cell{n:02d}", "metadata": {}, "source": src.strip("\n").splitlines(keepends=True)}
         if kind == CODE:
             cell.update({"execution_count": None, "outputs": []})
         cells.append(cell)
