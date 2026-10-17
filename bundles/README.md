@@ -9,6 +9,8 @@ Never edit a bundle after it has been scored; copy it to a new folder instead.
 | `run02_baseline` | — | `807f4a38293a` | Budget-Aware v2 as published: single agent, 31B, temp 0.2, output 8192, thinking 4096 (thoughts kept), 28 calls / 8 min | 27.5% (65/236); overflow 30.5% | not submitted by us (author's SuperAgent: 0.18) |
 | `v3_overflow_fix` | run02_baseline | `35ac39233068` | Context budget: output 8192→6144, thinking 4096→2048, `include_thoughts` true→false; graph tools removed from `agent.yaml` and the prompt line that banned them | — | — |
 | `v4_prompt_hygiene` | v3_overflow_fix | `021e2d9fbf11` | Prompt only (from smoke traces): one failed edit_file of any kind -> inline script; no escaped newlines/quotes in tool arguments; `git grep -n` named symbols instead of paging a big file; remove every use of a removed import; `py_compile` after each edit; scratch in /tmp and `git checkout` stray repo changes | — | — |
+| `v3_nothink` | v3_overflow_fix | `2e4521486c58` | Speed: `thinking_budget` 2048→0 (thinking off). Only change. | — | — |
+| `v3_think1024` | v3_overflow_fix | `9e008131c7b1` | Speed: `thinking_budget` 2048→1024. Only change. | — | — |
 
 ## Notes
 
@@ -25,7 +27,7 @@ Never edit a bundle after it has been scored; copy it to a new folder instead.
 - `v5_analyzer` (parent: best of v3/v4): read-only `code_analyzer` as `agent_tool`, short
   LOCATION / ROOT CAUSE / FIX PLAN report. Raise `max_tool_calls` if its calls share the budget.
 - `v3_12b`: v3 with `gemma-4-12b-it-qat-w4a16-ct` (speed vs accuracy).
-- `v3_nothink`: v3 with `thinking_budget: 0`.
+- `v3_nothink` and `v3_think1024`: built (see table). Compare against v3 on the same task ids, at least two runs each; judge by resolved count AND median seconds per task.
 
 ## Evidence behind v4 (smoke traces, 17 Oct 2026, v3 on fastapi_15661 / requests_7505 / rich_4070)
 
