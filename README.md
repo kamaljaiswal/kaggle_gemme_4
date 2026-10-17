@@ -16,6 +16,7 @@ scripts/
   validate_bundle.py     checks a bundle against the harness rules, writes a deterministic zip + bundle id
   build_ledger.py        results dir(s) -> one ledger table, budget vs skill failure split
   pick_pilot.py          fixed, stratified pilot task list from a ledger
+  trace_stats.py         per-task trace statistics: failed calls, first edit, verification, hidden-thinking share
 analysis/
   localization_benchmark.py   TF-IDF vs grep vs embeddings vs graph: Hit@k for the gold file (CPU only)
 notebooks/
@@ -46,6 +47,9 @@ python scripts/validate_bundle.py bundles/v3_overflow_fix --zip out/
 # 2. after a run, build the ledger (on Kaggle the runner notebook does this for you)
 python scripts/build_ledger.py results/run_02 --bundle-id 807f4a38293a \
     --tasks /kaggle/input/competitions/gemma-4-developer-agent/tasks.jsonl --tool-cap 28 --out ledger/run_02.csv
+
+# 2b. why tasks failed: failed tool calls, first edit, verification, thinking share (from the run's trace files)
+python scripts/trace_stats.py results/run_X/harness/traces --out ledger/trace_stats_X.csv
 
 # 3. make the fixed pilot list (8 resolved, 8 tests_failed, 8 overflow from run_02)
 python scripts/pick_pilot.py ledger/run_02.csv --per-outcome 8 --out pilot/pilot_ids.txt

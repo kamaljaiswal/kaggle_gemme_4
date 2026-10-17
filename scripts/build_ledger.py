@@ -45,11 +45,12 @@ CANDIDATES = {
     "repo": ["repo", "repository"],
     "resolved": ["resolved", "success", "passed"],
     "tool_calls": ["tool_calls", "num_tool_calls", "tool_calls_used"],
-    "llm_calls": ["llm_calls", "num_llm_calls", "turns", "model_calls"],
+    "llm_calls": ["llm_calls", "total_llm_calls", "num_llm_calls", "turns", "model_calls"],
     "duration_s": ["duration_seconds", "duration_s", "duration", "elapsed_seconds"],
     "test_exit_code": ["test_exit_code", "exit_code"],
     "patch": ["agent_patch", "patch", "prediction"],
     "error": ["error", "agent_error", "error_message", "failure_reason", "status_message"],
+    "test_output": ["test_output"],
 }
 
 BUDGET = {"context_overflow", "timeout", "tool_cap"}
@@ -60,6 +61,9 @@ OVERFLOW_PAT = re.compile(
     r"context.{0,20}(length|window|limit)|maximum context|max_model_len|too many tokens|"
     r"ContextWindow|prompt.{0,30}too long|exceeds?.{0,30}(context|tokens)", re.I)
 TIMEOUT_PAT = re.compile(r"time ?out|timed out|TimeoutExceeded|time budget|deadline", re.I)
+# Test-environment problems that no patch can fix (e.g. a pytest plugin missing in the offline sandbox).
+# Only a flag, never a failure type: it marks tasks to look at, it does not remove them from the score.
+ENV_PAT = re.compile(r"ERROR at setup of|recursive dependency involving fixture|fixture '[^']+' not found", re.I)
 APPLY_PAT = re.compile(r"failed to apply|patch.{0,20}(apply|does not apply)", re.I)
 
 
@@ -160,6 +164,7 @@ def read_run(run_dir: Path, bundle_id: str, gold: dict, mapping: dict, tool_cap:
             "llm_calls": pick(rec, "llm_calls", mapping, used),
             "duration_s": pick(rec, "duration_s", mapping, used),
             "test_exit_code": pick(rec, "test_exit_code", mapping, used),
+            "env_suspect": bool(ENV_PAT.search(str(pick(rec, "test_output", mapping, used) or ""))),
             "patch_chars": len((patch or "").strip()) if (patch or "").strip() != "NO_PATCH" else 0,
             "files_touched": ";".join(touched),
             "gold_files": ";".join(gold_files),
@@ -197,6 +202,10 @@ def summarize(df: pd.DataFrame) -> str:
         if len(finished):
             out.append(f"  resolved among tasks without budget/harness failure: "
                        f"{finished['resolved'].mean():.1%} ({finished['resolved'].sum()}/{len(finished)})")
+        es = d[(d["failure_type"] == "tests_failed") & d["env_suspect"]]
+        if len(es):
+            out.append(f"  env_suspect: {len(es)} tests_failed task(s) show test-setup errors "
+                       f"({', '.join(es['instance_id'].astype(str).head(5))}) - check before blaming the agent")
         lh = d["loc_hit"].dropna()
         if len(lh):
             out.append(f"  patch touched a gold file: {lh.mean():.1%} of {len(lh)} patched tasks")

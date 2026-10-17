@@ -164,6 +164,28 @@ def test_localization_benchmark(tmp_path=None):
     assert (tmp / "loc" / "summary.md").is_file()
 
 
+def test_trace_stats(tmp_path=None):
+    tmp = Path(tmp_path or tempfile.mkdtemp())
+    (tmp / "traces").mkdir()
+    def step(i, name, args, obs, comp, prompt, t):
+        return {"step_id": i, "source": "agent", "metrics": {"completion_tokens": comp, "prompt_tokens": prompt},
+                "tool_calls": [{"function_name": name, "arguments": args, "extra": {"elapsed_s": t}}],
+                "observation": {"content": obs}}
+    trace = {"steps": [
+        {"step_id": 1, "source": "system", "message": "x"},
+        step(3, "run_command", {"command": "git grep -n foo"}, '{"status": "ok"}', 900, 4000, 20),
+        step(4, "edit_file", {"filepath": "a.py"}, '{"error": "Invoking `edit_file()` failed"}', 100, 5000, 30),
+        step(5, "edit_file", {"filepath": "a.py", "old_string": "a", "new_string": "b"}, '{"status": "ok"}', 60, 2000, 40),
+        step(6, "run_command", {"command": "python -m py_compile a.py"}, '{"status": "ok"}', 30, 2500, 45),
+    ]}
+    (tmp / "traces" / "trace_demo_1.json").write_text(json.dumps(trace))
+    sh("scripts/trace_stats.py", str(tmp / "traces"), "--out", str(tmp / "ts.csv"))
+    r = pd.read_csv(tmp / "ts.csv").iloc[0]
+    assert r["instance_id"] == "demo_1" and r["calls"] == 4 and r["failed_calls"] == 1
+    assert r["first_edit_call"] == 2 and r["verify_calls"] == 1 and r["compactions"] == 1
+    assert 0.5 < r["hidden_share"] < 1 and r["wall_s"] == 45
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_") and callable(fn):
