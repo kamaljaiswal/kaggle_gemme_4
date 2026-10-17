@@ -330,10 +330,10 @@ print(f'all runs done in {(time.time() - t_start) / 60:.1f} min')
 ALL = WORK / 'results' / f'ledger_all_{SESSION}.csv'
 r = subprocess.run([sys.executable, str(REPO_DIR / 'scripts' / 'build_ledger.py'), *map(str, RUN_DIRS),
                     '--bundle-id', *RUN_BUNDLE_IDS, '--tasks', str(TASKS_PATH), '--results-file', 'runner_results.jsonl',
-                    '--tool-cap', '28', '--out', str(ALL)], capture_output=True, text=True)
+                    '--tool-cap', str(max(int((yaml.safe_load((REPO_DIR / 'bundles' / n / 'eval_config.yaml').read_text()) or {}).get('max_tool_calls', 28)) for n in BUNDLE_LIST)), '--out', str(ALL)], capture_output=True, text=True)
 print(r.stdout[-6000:], r.stderr[-1500:])
 
-L = pd.read_csv(ALL)
+L = pd.read_csv(ALL, dtype={'bundle_id': str, 'run_id': str, 'instance_id': str})
 L['secs'] = pd.to_numeric(L['duration_s'], errors='coerce')
 L['bundle'] = L['bundle_id'].map({v: k for k, v in BUNDLE_IDS.items()})
 tab = L.groupby(['bundle', 'run_id']).agg(
@@ -344,7 +344,7 @@ tab = L.groupby(['bundle', 'run_id']).agg(
     median_s=('secs', 'median'), p90_s=('secs', lambda s: s.quantile(0.9)))
 print('\\nCOMPARISON (same tasks, one row per run)'); print(tab.round(0).to_string())
 print('\\nPER TASK (1 = resolved)')
-print(L.pivot_table(index='instance_id', columns='run_id', values='resolved', aggfunc='max').astype(int).to_string())
+print(L.pivot_table(index='instance_id', columns='run_id', values='resolved', aggfunc='max').astype(float).fillna(-1).astype(int).to_string())   # -1 = not run
 """),
 (MD, """## 7. Package
 
