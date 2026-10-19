@@ -186,6 +186,26 @@ def test_trace_stats(tmp_path=None):
     assert 0.5 < r["hidden_share"] < 1 and r["wall_s"] == 45
 
 
+def test_check_submission_zip(tmp_path=None):
+    import zipfile
+    tmp = Path(tmp_path or tempfile.mkdtemp())
+    bundle = REPO / "bundles" / "v3_overflow_fix"
+    sh("scripts/validate_bundle.py", str(bundle), "--zip", str(tmp / "good"))
+    good = next((tmp / "good").glob("*.zip"))
+    r = subprocess.run([PY, str(REPO / "scripts/check_submission_zip.py"), str(good), "--bundle", str(bundle)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    # the layout that failed submission #1: files inside a folder, plus macOS junk
+    bad = tmp / "bad.zip"
+    with zipfile.ZipFile(bad, "w") as z:
+        for f in bundle.rglob("*"):
+            if f.is_file():
+                z.write(f, "submission/" + f.relative_to(bundle).as_posix())
+        z.writestr("__MACOSX/submission/._agent.yaml", "x")
+    r = subprocess.run([PY, str(REPO / "scripts/check_submission_zip.py"), str(bad)], capture_output=True, text=True)
+    assert r.returncode == 1 and "top level" in r.stdout and "junk entry" in r.stdout, r.stdout
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_") and callable(fn):

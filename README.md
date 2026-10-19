@@ -14,6 +14,7 @@ bundles/                 one folder per agent version (exactly what goes into su
   README.md              registry: what changed in each bundle and what it scored
 scripts/
   validate_bundle.py     checks a bundle against the harness rules, writes a deterministic zip + bundle id
+  check_submission_zip.py   checks the zip file itself before upload (agent.yaml at root, no junk, matches the bundle)
   build_ledger.py        results dir(s) -> one ledger table, budget vs skill failure split
   pick_pilot.py          fixed, stratified pilot task list from a ledger
   trace_stats.py         per-task trace statistics: failed calls, first edit, verification, hidden-thinking share
@@ -24,6 +25,7 @@ notebooks/
   build_runner_notebook.py   source of the notebook (edit this, then regenerate)
 paper/                   paper-track draft and figures
 pilot/                   pilot_ids.txt (create it from the run_02 ledger, see below)
+submissions/             LOG.md (every leaderboard submission and its score) and the exact zips uploaded
 tests/                   end-to-end tests of the scripts on a synthetic dataset
 ```
 
@@ -69,14 +71,29 @@ private Kaggle Dataset, and attach it with the competition data, the Gemma 4 mod
 `BUNDLES` (one or several bundle folders) and `MODE` in the first cell, and run all. With several bundles and
 `REPEATS = 2`, one GPU session compares them on the same tasks and prints a comparison table at the end. Details are in the notebook's first cell.
 
+## Submitting
+
+1. Build the zip with the script, never by hand (Finder/Explorer wrap the files in a folder and add `__MACOSX/` files;
+   that is what made submission #1 fail with "Notebook Threw Exception"):
+   ```bash
+   python scripts/validate_bundle.py bundles/<name> --zip out/
+   python scripts/check_submission_zip.py out/<name>.zip --bundle bundles/<name>   # must print "OK: safe to upload"
+   ```
+   The Kaggle runner does both and writes `submission_<name>.zip`; its agent runs from that same unzipped zip.
+2. Rename it to `submission.zip` and upload it on the competition's Submit tab (File Upload), or
+   `kaggle competitions submit -c gemma-4-developer-agent -f submission.zip -m "<bundle> <bundle id>"`.
+   Errors count toward the 1-per-day limit.
+3. Copy the zip to `submissions/<date>_<bundle>/` and add a row to `submissions/LOG.md`; fill in the score later.
+
 ## What is verified and what is not
 
 - The scripts pass end-to-end tests on a synthetic dataset that follows the documented data layout.
 - They have **not** run on the real competition data from here (no access to it). On the first real run:
   - `build_ledger.py` prints which result fields it found; if any are missing, pass `--map field=key`.
   - `localization_benchmark.py` prints a note for any task whose gold file it cannot match to the snapshot.
-- The runner notebook follows the official starter notebook's API calls, but has not been executed.
-  Run it in `smoke` mode first.
+- The runner notebook has run on Kaggle (smoke, ids and a two-bundle comparison, 19 Oct 2026).
+- No submission has scored yet. #1 errored, most likely from the hand-made zip layout (see `submissions/LOG.md`);
+  the zip a local run tests is now the same file that gets uploaded.
 
 ## Credits
 

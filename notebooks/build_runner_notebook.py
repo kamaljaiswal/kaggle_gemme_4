@@ -42,7 +42,7 @@ STOP_AFTER_HOURS = 11.0             # stop starting new tasks after this much wa
 REPO_DIR = None                     # None -> auto-detect the uploaded repo under /kaggle/input
 """),
 (MD, "## 1. Environment (same as the official starter)"),
-(CODE, """import glob, importlib, json, logging, os, re, shutil, subprocess, sys, time, hashlib
+(CODE, """import glob, importlib, json, logging, os, re, shutil, subprocess, sys, time, hashlib, zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -139,6 +139,12 @@ def prepare_bundle(name, quiet=False):
     assert v.returncode == 0, f'Bundle {name} failed validation; fix it before spending GPU time.'
     BUNDLE_IDS[name] = re.search(r'bundle id (\\w+)', v.stdout).group(1)
     ZIPS[name] = next(zdir.glob('*.zip'))
+    # Run from the unzipped zip, not the folder copy, so a local run tests exactly the file you upload.
+    shutil.rmtree(AGENT_DIR, ignore_errors=True); AGENT_DIR.mkdir(parents=True)
+    with zipfile.ZipFile(ZIPS[name]) as z:
+        z.extractall(AGENT_DIR)
+    assert (AGENT_DIR / 'agent.yaml').is_file() or any((AGENT_DIR / n).is_file() for n in ('agent.yml', 'root_agent.yaml', 'root_agent.yml')), \
+        f'{name}: root config is not at the top of the zip'
 
 for name in BUNDLE_LIST:
     prepare_bundle(name)
@@ -352,6 +358,12 @@ print(L.pivot_table(index='instance_id', columns='run_id', values='resolved', ag
 `results_<SESSION>.zip` holds every run's outputs and traces: download it and send it back for analysis."""),
 (CODE, """for name in BUNDLE_LIST:
     shutil.copyfile(ZIPS[name], WORK / f'submission_{name}.zip')
+    c = subprocess.run([sys.executable, str(REPO_DIR / 'scripts' / 'check_submission_zip.py'), str(WORK / f'submission_{name}.zip'),
+                        '--bundle', str(REPO_DIR / 'bundles' / name)] if not MODEL_OVERRIDE else
+                       [sys.executable, str(REPO_DIR / 'scripts' / 'check_submission_zip.py'), str(WORK / f'submission_{name}.zip')],
+                       capture_output=True, text=True)
+    print(f'--- zip check: {name} ---'); print(c.stdout, c.stderr)
+    assert c.returncode == 0, f'submission_{name}.zip failed the zip check; do not upload it'
 shutil.copyfile(ZIPS[BUNDLE_LIST[0]], WORK / 'submission.zip')     # with several bundles, submit the one you choose
 arc = shutil.make_archive(str(WORK / f'results_{SESSION}'), 'zip', root_dir=WORK / 'results')
 print('submission (first bundle):', WORK / 'submission.zip', '| per bundle:', [f'submission_{n}.zip' for n in BUNDLE_LIST])
