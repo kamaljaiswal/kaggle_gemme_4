@@ -7,3 +7,4 @@ results/
 ledger/*.csv
 *.zip
 .DS_Store
+!submissions/**/*.zip
