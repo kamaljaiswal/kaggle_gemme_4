@@ -11,9 +11,24 @@ Never edit a bundle after it has been scored; copy it to a new folder instead.
 | `v4_prompt_hygiene` | v3_overflow_fix | `021e2d9fbf11` | Prompt only (from smoke traces): one failed edit_file of any kind -> inline script; no escaped newlines/quotes in tool arguments; `git grep -n` named symbols instead of paging a big file; remove every use of a removed import; `py_compile` after each edit; scratch in /tmp and `git checkout` stray repo changes | 4/12 (33%), same 4 tasks as v3; median 228 s; more tool-cap/timeout failures (4 vs 2); faster on solved tasks (385 s vs 704 s) | not submitted |
 | `v3_nothink` | v3_overflow_fix | `2e4521486c58` | Speed: `thinking_budget` 2048→0 (thinking off). Only change. | — | — |
 | `v3_think1024` | v3_overflow_fix | `9e008131c7b1` | Speed: `thinking_budget` 2048→1024. Only change. | — | — |
-| `v5_budget` | v4_prompt_hygiene | `bf42b8801880` | Budget (from the v3/v4 12-task run: 4-5 of 8 failures used all 28 calls; median 4.2 min of 8): `max_tool_calls` 28→40, `timeout_seconds` (per command) 240→90, `max_turns` 80→60; prompt numbers updated (verify to call 30); pytest exit code printed before the tail; /tmp scratch written via run_command (write_file refuses paths outside /workspace) | — | — |
-| `x_v26_workflow` | external | `56c9c16eefe0` | **Not ours, verbatim reference.** A participant's v26 workflow shared on 20 Oct 2026: SequentialAgent analyst → fixer → verifier, explorer as agent_tool with graph tools, thinking 2048 on three agents, 40 calls / 50 turns / 60 s per command / 8 min. Its nested `config_path: agents/explorer.yaml` only resolves from the bundle root (validator warns); a Kaggle run decides whether the harness loads it | — | — |
-| `x_timeout_probe` | external | `5d07fda7a2a0` | **Not a solver.** Harness probe shared on 20 Oct 2026: writes a marker file, runs a 75 s command against a 30 s command timeout, then idles until the 1.5 min task limit. Graph tools dropped and `thinking_budget: 0` added (neither matters to the probe). Expect 0 resolved; read its traces and ledger rows | — | — |
+| `v5_budget` | v4_prompt_hygiene | `bf42b8801880` | Budget (from the v3/v4 12-task run: 4-5 of 8 failures used all 28 calls; median 4.2 min of 8): `max_tool_calls` 28→40, `timeout_seconds` (per command) 240→90, `max_turns` 80→60; prompt numbers updated (verify to call 30); pytest exit code printed before the tail; /tmp scratch written via run_command (write_file refuses paths outside /workspace) | 20 Oct, same 12 tasks: 4/12 (3/11 without fastapi_14077), same tasks as v3; 3 timeouts; 0.86 h (v3 0.75 h). No gain from 40 calls | not submitted |
+| `x_v26_workflow` | external | `56c9c16eefe0` | **Not ours, verbatim reference.** A participant's v26 workflow shared on 20 Oct 2026: SequentialAgent analyst → fixer → verifier, explorer as agent_tool with graph tools, thinking 2048 on three agents, 40 calls / 50 turns / 60 s per command / 8 min. Its nested `config_path: agents/explorer.yaml` only resolves from the bundle root (validator warns); a Kaggle run decides whether the harness loads it | 20 Oct, same 12 tasks: 5/12 (4/11), +rich_3470 over v3; median 389 s, 1.24 h for 12 → ~12.4 h for 120 (over the window); explorer agent_tool loaded (10 calls), so nested config_path resolves from the bundle root | not submitted |
+| `x_timeout_probe` | external | `5d07fda7a2a0` | **Not a solver.** Harness probe shared on 20 Oct 2026: writes a marker file, runs a 75 s command against a 30 s command timeout, then idles until the 1.5 min task limit. Graph tools dropped and `thinking_budget: 0` added (neither matters to the probe). Expect 0 resolved; read its traces and ledger rows | 20 Oct: see Harness facts below | not submitted |
+
+## Harness facts measured on Kaggle (20 Oct 2026, x_timeout_probe and x_v26_workflow)
+
+- `timeout_seconds` is enforced per command: a 75 s command was killed at 30 s and the agent saw only
+  `{"status": "error", "error_type": "TimeoutExceeded", "error_message": "Command timed out after 30 seconds"}` (no output).
+- `max_time_minutes` is enforced per task with a few seconds of slack (1.5 min tasks took 93-99 s); the result is
+  `Agent exceeded session timeout`, failure type `timeout`.
+- Work done before a stop is graded: the marker file written in call 1 was in every graded patch, including on timeout.
+- `get_status` reported `patch_size: 0` after a new (untracked) file was written, yet the graded patch contained it.
+  Do not treat `patch_size: 0` as "nothing changed" when the change is a new file.
+- `fastapi_14077` passed with only the probe's marker file as the patch: its tests pass on the unchanged code, so
+  every bundle "solves" it. Report local results with and without it.
+- A nested `agent_tool` `config_path` is resolved from the bundle root (x_v26_workflow's explorer was called 10 times).
+- Per-task resolved sets are almost identical across bundles and runs: v3 solved the same 4 tasks on 19 and 20 Oct;
+  of the 12 tasks, 4 are solved by every bundle and 6 by none, so only 2 tasks separate bundles on this set.
 
 ## Notes
 
