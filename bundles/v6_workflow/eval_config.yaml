@@ -1,0 +1,7 @@
+# v6_workflow: x_v26_workflow (a participant's analyst/fixer/verifier workflow) with the task limit cut from
+# 8 to 6 minutes. On 20 Oct its 12 tasks took 1.24 h (about 12.4 h for 120), over the 12-hour window.
+evaluation:
+  timeout_seconds: 60
+  max_tool_calls: 40
+  max_time_minutes: 6
+  max_turns: 50
