@@ -124,7 +124,7 @@ def prepare_bundle(name, quiet=False):
     assert src.is_dir(), f'bundle not found: {src}'
     shutil.rmtree(AGENT_DIR, ignore_errors=True); shutil.copytree(src, AGENT_DIR)
     if MODEL_OVERRIDE:
-        for yp in [AGENT_DIR / 'agent.yaml', *sorted((AGENT_DIR / 'sub_agents').glob('*.yaml'))]:
+        for yp in sorted(AGENT_DIR.rglob('*.y*ml')):
             if yp.is_file():
                 txt = re.sub(r'^(\\s*model:\\s*).*$', rf'\\g<1>{MODEL_OVERRIDE}', yp.read_text(), flags=re.M)
                 if not MODEL_OVERRIDE.startswith('gemma-4-31b'):
@@ -150,9 +150,15 @@ for name in BUNDLE_LIST:
     prepare_bundle(name)
 
 # One vLLM server serves the whole session, so every bundle must declare the same base model.
-base_models = {n: (MODEL_OVERRIDE or re.search(r'^\\s*model:\\s*(\\S+)', (REPO_DIR / 'bundles' / n / 'agent.yaml').read_text(), re.M).group(1))
-               for n in BUNDLE_LIST}
-assert len(set(base_models.values())) == 1, f'bundles use different models, run them in separate sessions: {base_models}'
+def bundle_models(n):
+    # every model: line in the bundle's yaml files (a workflow root such as SequentialAgent declares none itself)
+    found = set()
+    for yp in (REPO_DIR / 'bundles' / n).rglob('*.y*ml'):
+        found |= set(re.findall(r'^\\s*model:\\s*(\\S+)', yp.read_text(), re.M))
+    return {MODEL_OVERRIDE} if MODEL_OVERRIDE else found
+base_models = {n: bundle_models(n) for n in BUNDLE_LIST}
+all_models = set().union(*base_models.values())
+assert len(all_models) == 1, f'bundles use different models, run them in separate sessions: {base_models}'
 prepare_bundle(BUNDLE_LIST[0], quiet=True)    # leave the first bundle in AGENT_DIR; the server is started from it
 print('BUNDLE_IDS =', BUNDLE_IDS)
 """),
