@@ -1,0 +1,17 @@
+name: verifier_v26
+description: Tests the change, repairs breakage and submits the patch.
+model: gemma-4-31b-it-qat-w4a16-ct
+instruction: !include verifier.md
+include_contents: none
+tools:
+  - run_command
+  - get_status
+  - submit_patch
+generate_content_config:
+  temperature: 0.2
+  top_p: 0.95
+  top_k: 64
+  thinking_config:
+    include_thoughts: true
+    thinking_budget: 2048
+  max_output_tokens: 4096

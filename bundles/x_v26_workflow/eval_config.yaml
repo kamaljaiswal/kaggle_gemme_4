@@ -1,0 +1,7 @@
+# Candidate v26-workflow: v25-workflow with thinking (budget 2,048) for the analyst, fixer and verifier and 8 minutes per task. v25-workflow: v20-workflow with FastAPI's docs_src examples handled, features following their closest sibling, and temperature 0.2. v20-workflow: v16-workflow with pytest's exit code printed before the output's tail and check scripts on standard input. v16-workflow: v15-workflow with a verifier that checks the statement's behaviour and repairs failures before submitting. v15-workflow: a SequentialAgent of analyst, fixer and verifier with v7-explorer's explorer, limits and edit method. v7-explorer: v6-explorer asking for a complete change. v6-explorer: v5-explorer with the explorer limited to two questions of six calls. v5-explorer: v2-explorer without read_file and edit_file (reading and editing through run_command); same limits as v2-focused; explorer calls count against the same tool budget. Counts sized so prompts stay below the context limit; 4.5 minutes is the guaranteed cap
+# for 120 tasks from the 2026-09-27 measurements (runbook, budget calculator).
+evaluation:
+  timeout_seconds: 60
+  max_tool_calls: 40
+  max_time_minutes: 8
+  max_turns: 50

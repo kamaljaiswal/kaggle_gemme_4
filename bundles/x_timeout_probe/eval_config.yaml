@@ -1,0 +1,6 @@
+# Timeout probe: a 30 s command timeout against a 75 s command, then a 1.5 minute task limit.
+evaluation:
+  timeout_seconds: 30
+  max_tool_calls: 20
+  max_time_minutes: 1.5
+  max_turns: 25

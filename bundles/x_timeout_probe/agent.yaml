@@ -1,0 +1,22 @@
+# Harness timeout probe (not a solver). Questions it answers on a real run:
+# - is a 75 s command killed at timeout_seconds (30), and what does the agent see?
+# - is the task stopped at max_time_minutes (1.5), and how is it recorded (failure type, duration)?
+# - is a file written before the stop present in the graded patch?
+name: compact_coder
+model: gemma-4-31b-it-qat-w4a16-ct
+instruction: !include prompts/system.md
+tools:
+  - run_command
+  - submit_patch
+  - get_status
+  - read_file
+  - edit_file
+  - write_file
+generate_content_config:
+  temperature: 0.7
+  top_p: 0.95
+  top_k: 64
+  thinking_config:
+    include_thoughts: false
+    thinking_budget: 0
+  max_output_tokens: 2048

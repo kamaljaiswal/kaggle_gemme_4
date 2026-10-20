@@ -1,0 +1,48 @@
+# Structured workflow: a SequentialAgent of three LlmAgents, so that phases are enforced by each agent's tools and
+# context instead of prompt rules, which the model often ignored (v13: "at most three runs before the first edit" raised
+# median probes from 2 to 7). v7's 27 empty patches on the 2026-09-30 harness spent 365 lead calls on python/pytest runs
+# and 8 on edits.
+# - analyst: sees the task prompt; explorer agent tool and run_command; cannot write files; ends with a plan (state key
+#   plan).
+# - fixer: starts fresh (include_contents none) with the problem statement (swegemma's session state
+#   problem_description) and the plan in its instruction; reads and edits, runs no tests; ends with a summary (changes).
+# - verifier: starts fresh with statement, plan and changes; runs the check and the repository's tests, repairs breakage,
+#   submits.
+# All three share the task's tool-call, turn and time budget (eval_config.yaml, as v7).
+# v16: v15 with a verifier that acts on failures. In v15 (Kaggle 4x L4, 2026-10-04) empty patches fell from 14 to 6
+# against v7 but wrong fixes rose from 16 to 23; in those attempts the verifier often saw failing tests and submitted
+# anyway (it edited once in 52 attempts), and its own checks were existing tests that do not cover the new behaviour.
+# Thinking off explicitly: from the organizers' build of 2026-10-09 (adk-submission 0.2.13), swegemma's default
+# thinking_budget of 4096 enables thinking even with include_thoughts: false; a budget of 0 keeps it off.
+# v20: v16 with test results the verifier can trust, limits unchanged. In v16's traces (Kaggle L4, 2026-10-11) 39
+# pytest runs in 11 tasks returned exit code 0 although pytest reported failures, collection errors or no tests: the
+# prompt's `pytest ... | tail -15` returned tail's status. The verifier now writes pytest's output to /tmp/pytest.log,
+# prints "pytest exit code N" and then the log's tail, and is told what each exit code means. The command still
+# succeeds: a failed command returns its output twice (error message and details), doubling long diffs in context. Its /tmp check scripts were sometimes written with
+# write_file, which refuses paths outside the workspace (20 refusals in 17 attempts): the check now goes to python3 on
+# standard input, and the verifier no longer has write_file (it repairs through run_command, as before).
+# v25: v20 with three ideas taken from a public notebook that scored 0.20
+# (https://www.kaggle.com/code/jvnhonglei/gemma-4-superagent-reproduction, Apache 2.0; a single agent with thinking,
+# temperature 0.2 and 8 minutes), keeping v20's limits:
+# - FastAPI's docs_src/ examples. 6 of 35 FastAPI reference patches change files under docs_src/ that the grader's tests
+#   import (for example docs_src.dependencies...), and 5 of those 6 tasks were never solved: in 40 attempts of v16-v24
+#   none touched docs_src/, and 10 broke test collection. The analyst now looks for such examples, the fixer edits them
+#   and the verifier runs the tests that import them.
+# - Features follow the closest existing sibling, including where it is registered (__all__, option lists, dispatch
+#   tables, imports).
+# - Temperature 0.2 instead of 0.7 for every agent: two attempts at a task mostly succeed or fail together (250 pairs,
+#   2026-10-18), so sampling variety buys little.
+# v26: v25 with the notebook's other two ideas. Thinking for the analyst, fixer and verifier (thinking_budget 2048,
+# max_output_tokens 4096, include_thoughts true; the explorer's searches stay without thinking); the notebook gives one
+# agent 4,096, and three agents think here. ADK leaves thought-only parts out of later requests, so thoughts cost time
+# (about 28 s per 1,000 tokens on 4x L4), not context. max_time_minutes 8, as the notebook's: our budget calculator's
+# worst case for 120 tasks is then 16 h against the 12-hour window, but the notebook's run with 8 minutes was scored, so
+# real durations stay well below the cap; v24's planner (thinking at the plan only, 4.5 minutes) gained nothing. Tool
+# calls and turns as v20.
+name: solver_v26
+agent_class: SequentialAgent
+description: Analyst, fixer and verifier, run in that order.
+sub_agents:
+  - config_path: agents/analyst.yaml
+  - config_path: agents/fixer.yaml
+  - config_path: agents/verifier.yaml

@@ -146,8 +146,17 @@ def walk_agent(cfg: dict, cfg_path: Path, bundle: Path, rep: Report, seen: set, 
     def child(rel: str) -> None:
         p = (cfg_path.parent / rel).resolve()
         if bundle.resolve() not in p.parents or not p.is_file():
-            rep.err(f"agent '{name}': config_path not found inside bundle: {rel}")
-            return
+            # Not found next to the referencing file. Some public bundles write nested config_paths relative to
+            # the bundle root (agents/analyst.yaml -> agent_tool config_path: agents/explorer.yaml). Which rule the
+            # harness uses is not documented here: accept it with a warning, and let a real Kaggle run decide.
+            q = (bundle / rel).resolve()
+            if bundle.resolve() in q.parents and q.is_file() and cfg_path.parent.resolve() != bundle.resolve():
+                rep.warn(f"agent '{name}': config_path '{rel}' only resolves from the bundle root, not from "
+                         f"{cfg_path.parent.relative_to(bundle)}/. Confirm on Kaggle that the harness loads it.")
+                p = q
+            else:
+                rep.err(f"agent '{name}': config_path not found inside bundle: {rel}")
+                return
         sub = load_yaml(p, bundle, rep)
         if isinstance(sub, dict):
             walk_agent(sub, p, bundle, rep, seen, out)
@@ -276,7 +285,7 @@ def main() -> int:
     ap.add_argument("--zip", type=Path, metavar="OUT_DIR", help="also write a deterministic zip here")
     ap.add_argument("--json", action="store_true", help="print a machine-readable summary")
     args = ap.parse_args()
-    bundle = args.bundle
+    bundle = args.bundle.resolve()
     if not bundle.is_dir():
         print(f"not a directory: {bundle}", file=sys.stderr)
         return 2

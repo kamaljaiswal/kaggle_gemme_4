@@ -1,0 +1,17 @@
+name: fixer_v26
+description: Implements the analyst's plan.
+model: gemma-4-31b-it-qat-w4a16-ct
+instruction: !include fixer.md
+include_contents: none
+output_key: changes
+tools:
+  - run_command
+  - write_file
+generate_content_config:
+  temperature: 0.2
+  top_p: 0.95
+  top_k: 64
+  thinking_config:
+    include_thoughts: true
+    thinking_budget: 2048
+  max_output_tokens: 4096
