@@ -7,6 +7,9 @@ Limit: 1 submission per day (resets about 24 h after use). Final submission 2 De
 **Read public scores with care.** The public leaderboard scores 58 tasks, so one task is about 0.017, and identical files have
 scored up to 6 tasks apart on repeated runs (source: dmitriigluzdov, *Gemma 4: Task Soundness, Serving and Evaluation*,
 citing Dariush Afshar's leaderboard analysis). A difference of less than about 0.10 between two single submissions does not rank them.
+Another team resubmitted the unchanged public 0.22 agent (flexonafft budget-aware v2 = our `run02_baseline`) three times and got
+0.13, 0.13 and 0.17; their context-safety prompt variant got 0.18 once (notebook *Gemma 4 Developer Agent: The Road from 0.12
+to 0.25+*, read 21 Oct 2026). So the base's typical score is about 0.13-0.18, and v3's 0.12 is at the low end of that range.
 
 | # | Date (IST) | Bundle | Bundle id | Zip sha256 (first 12) | Local evidence | Score | Notes |
 |---|---|---|---|---|---|---|---|
