@@ -4,9 +4,11 @@ Source: forum post and notebook text pasted by the user (attachment fc12224f). L
 
 ## Leaderboard shape (measured)
 
-4,018 teams. Solved tasks of 58: 14 tasks (0.24) 6 teams; 13 (0.22) 48; 12 (0.21) 218; 10 (0.17) 1,260; 9 (0.15) 581;
-8 (0.14) 397; 7 (0.12) 320; 6 (0.10) 264. No team at 11 (0.19): scores are counts out of 58, so some values cannot occur.
-Our scores: 0.12, 0.15, 0.17, 0.13, 0.15 = 7, 9, 10, 8, 9 tasks. 0.17 is the most common score on the board.
+4,018 teams. Scores are truncated (not rounded) to 2 decimals, so each score maps to one task count: 14 tasks (0.24) 6 teams;
+13 (0.22) 48; 12 (0.20) 218; 11 (0.18) 571; 10 (0.17) 689; 9 (0.15) 581; 8 (0.13) 397; 7 (0.12) 320; 6 (0.10) 264.
+The author's notebook rounds score x 58, which merges 0.17 and 0.18 into 10 tasks (1,260 teams) and shows no team at 11;
+that is an artefact of rounding. The median team scores 0.15 (9 tasks); the most common score is 0.17.
+Our scores: 0.12, 0.15, 0.17, 0.13, 0.15 = 7, 9, 10, 8, 9 tasks.
 
 ## Noise
 
