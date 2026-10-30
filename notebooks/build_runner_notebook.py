@@ -27,7 +27,13 @@ and writes results the ledger script can read. Use it **before** submitting.
 - `smoke`: 3 tasks. Checks the bundle loads, tools work and a patch comes out (~10 min).
 - `pilot`: the fixed list in `pilot/pilot_ids.txt` (~1–1.5 h for 24 tasks).
 - `ids`: the ids you list in `TASK_IDS`.
+- `valid`: `N_VALID` tasks sampled (fixed seed, by repo) from the 126 public tasks whose reference patch can pass. Use this to compare bundles.
 - `all`: every task (~6.5 h for 129 tasks at ~3 min each; keep an eye on your GPU quota).
+
+**Scorer-like grading (`SCORER_LIKE = True`)**: in a plain notebook only 52 of 129 reference patches pass, so most local failures
+are the environment, not the agent. Attach two more datasets: `zbigniewkirchner/gemma-4-agent-local-eval-wheels` and
+`zbigniewkirchner/gemma-4-agent-local-eval-pythons`. The setup is adapted from his notebook
+"Gemma 4 Agent: Do Gold Patches Pass Locally?" (Apache 2.0), where 127 of 129 reference patches pass.
 
 Results go to `/kaggle/working/results/<RUN_ID>/`. Download `results_<SESSION>.zip` at the end, **before stopping the session**.
 """),
@@ -40,6 +46,10 @@ MODEL_OVERRIDE = None               # e.g. "gemma-4-12b-it-qat-w4a16-ct" to test
 RUN_ID = None                       # None -> <bundle>_<mode>_<timestamp>[_rN]; only used when there is a single run
 STOP_AFTER_HOURS = 11.0             # stop starting new tasks after this much wall time
 REPO_DIR = None                     # None -> auto-detect the uploaded repo under /kaggle/input
+SCORER_LIKE = True                  # grade in a scorer-like sandbox (needs Zbigniew Kirchner's two datasets); False = plain notebook
+GOLD_CHECK = True                   # before the model runs, grade the reference patches of the selected tasks (CPU, ~15 s/task)
+N_VALID = 40                        # used when MODE == "valid": tasks sampled from the 126 gradable ones, by repo
+VALID_SEED = 1                      # same seed = same tasks in every session
 """),
 (MD, "## 1. Environment (same as the official starter)"),
 (CODE, """import glob, importlib, json, logging, os, re, shutil, subprocess, sys, time, hashlib, zipfile
@@ -182,6 +192,20 @@ elif MODE == 'pilot':
     if missing: print('not in tasks.jsonl:', missing)
 elif MODE == 'ids':
     sel = [by_id[i] for i in TASK_IDS]
+elif MODE == 'valid':
+    import random
+    # 2 tasks no environment can pass (contradictory skip conditions) + 1 that passes with no change
+    EXCLUDE = {'fastapi_14186', 'rich_3486', 'fastapi_14077'}
+    pool = [t for t in tasks if t.instance_id not in EXCLUDE]
+    rng, groups = random.Random(VALID_SEED), {}
+    for t in pool:
+        groups.setdefault(t.repo, []).append(t)
+    sel = []
+    for repo_name in sorted(groups):
+        g = groups[repo_name]
+        sel += rng.sample(g, min(len(g), max(1, round(N_VALID * len(g) / len(pool)))))
+    sel = sorted(sel, key=lambda t: t.instance_id)
+    print('valid task ids:', [t.instance_id for t in sel])
 elif MODE == 'all':
     sel = list(tasks)
 else:
@@ -189,6 +213,199 @@ else:
 
 task_hash = hashlib.sha256(TASKS_PATH.read_bytes()).hexdigest()[:12]
 print(f'{len(sel)} tasks selected (tasks file {task_hash})')
+"""),
+(MD, """## 3b. Scorer-like sandbox (optional, recommended)
+
+Adapted from Zbigniew Kirchner, "Gemma 4 Agent: Do Gold Patches Pass Locally?" (Apache 2.0). Each sandbox gets a clean venv
+(no Kaggle packages) on top of a per-repo folder like the scorer image: the newest competition wheel of every package, pytest 8.4.2,
+pytest-timeout 2.1.0, the imp/telnetlib shims and the missing test packages. A small calibration makes old public tasks gradable.
+The same hook is used for the agent's own sandbox, so the agent also sees the scorer's packages."""),
+(CODE, """CURRENT = {'id': None}     # the task being run or graded; the hook reads it
+if SCORER_LIKE:
+    import tarfile, tomllib
+    from packaging.requirements import Requirement
+    from packaging.version import Version
+    import swegemma.harness.verification as verification
+    import swegemma.harness.agent_runner as agent_runner
+    from swegemma.sandbox.subprocess import SubprocessManager
+
+    def _find(pattern, what):
+        hits = glob.glob(f'/kaggle/input/**/{pattern}', recursive=True)
+        if not hits:
+            raise SystemExit(f'{what} not found. Add Input -> Datasets -> {what}, or set SCORER_LIKE = False.')
+        return Path(hits[0]).parent
+    EXTRA = _find('inline_snapshot-*.whl', 'zbigniewkirchner/gemma-4-agent-local-eval-wheels')
+    PYDS = _find('cpython-3.12-linux.tgz.bin', 'zbigniewkirchner/gemma-4-agent-local-eval-pythons')
+    NB_TAG = f'cp{sys.version_info.major}{sys.version_info.minor}'
+    if NB_TAG != 'cp313':
+        print(f'warning: notebook Python is {NB_TAG}; the scorer image uses 3.13')
+
+    def fits(w, tag=NB_TAG):
+        py, abi, plat = w.name[:-4].split('-')[-3:]
+        if plat != 'any' and 'linux' not in plat:
+            return False
+        if abi == 'abi3':
+            return int(py.split('.')[0][2:]) <= int(tag[2:])
+        return any(t.startswith('py3') for t in py.split('.')) or tag in py.split('.')
+
+    norm = lambda n: re.sub(r'[-_.]+', '_', n).lower()
+    WHEELS = {}
+    for w in [*(DATA_DIR / 'wheels').glob('*.whl'), *EXTRA.glob('*.whl'), *PYDS.glob('*.whl')]:
+        n_, v_ = w.name.split('-')[:2]
+        WHEELS.setdefault(norm(n_), []).append((Version(v_), w))
+    OWN = {'fastapi/fastapi': 'fastapi', 'Textualize/rich': 'rich', 'psf/requests': 'requests', 'encode/httpx': 'httpx'}
+    ONLY_FOR = {'pytest_httpbin': {'psf/requests'}, 'httpbin': {'psf/requests'}, 'flasgger': {'psf/requests'},
+                'brotlicffi': {'psf/requests', 'encode/httpx'}, 'brotli': {'encode/httpx'}, 'zstandard': {'encode/httpx'}}
+    PY = {NB_TAG: Path(sys.executable)}
+
+    def python_for(tag):
+        if tag not in PY:
+            ver = f'{tag[2]}.{tag[3:]}'
+            dest = WORK / f'py{tag}'
+            if not (dest / 'python' / 'bin' / f'python{ver}').exists():
+                with tarfile.open(PYDS / f'cpython-{ver}-linux.tgz.bin', 'r:gz') as t:
+                    t.extractall(dest)
+            PY[tag] = dest / 'python' / 'bin' / f'python{ver}'
+        return PY[tag]
+
+    BASE = {}
+    def base_for(repo, tag):
+        if (repo, tag) not in BASE:
+            chosen = {}
+            for name, opts in WHEELS.items():
+                opts = [(v, w) for v, w in opts if fits(w, tag)]
+                if not opts or name == OWN[repo] or (name in ONLY_FOR and repo not in ONLY_FOR[name]):
+                    continue
+                comp = [(v, w) for v, w in opts if w.parent == DATA_DIR / 'wheels']
+                if name in ('pytest', 'pytest_timeout'):
+                    chosen[name] = next(w for v, w in opts if str(v) in ('8.4.2', '2.1.0'))
+                elif comp:
+                    chosen[name] = max(comp)[1]
+                elif name != 'pygments':
+                    chosen[name] = max(opts)[1]
+            d = WORK / f'scorer_site_{OWN[repo]}_{tag}'
+            shutil.rmtree(d, ignore_errors=True)
+            subprocess.run([str(python_for(tag)), '-m', 'pip', 'install', '-q', '--no-index', '--no-deps',
+                            '--ignore-requires-python', '--target', str(d), *map(str, chosen.values())])
+            for shim in ('imp.py', 'telnetlib.py'):
+                shutil.copy(DATA_DIR / 'docker' / shim, d / shim)
+            BASE[(repo, tag)] = (d, chosen)
+        return BASE[(repo, tag)]
+
+    CALIBRATION = {
+        'rich_3064': {'pygments': '2.15.1'}, 'rich_3130': {'pygments': '2.15.1'}, 'rich_3296': {'pygments': '2.16.1'},
+        'rich_3469': {'pygments': '2.18.0'}, 'rich_3782': {'pygments': '2.19.2'}, 'rich_4070': {'pygments': '2.19.2'},
+        'rich_4079': {'pygments': '2.20.0'},
+        'requests_6589': {'werkzeug': '2.3.8', 'flask': '2.3.3'}, 'requests_6592': {'werkzeug': '2.3.8', 'flask': '2.3.3'},
+        'requests_6629': {'werkzeug': '2.3.8', 'flask': '2.3.3'}}
+    TASK_PYTHON = {'requests_6757': 'cp312', 'rich_3472': 'cp312'}
+    ASYNC_SHIM = {'fastapi_15745', 'fastapi_15763', 'fastapi_15785'}
+    NO_CERT_TIME = {'requests_6757'}
+
+    SHIM = WORK / 'shims'
+    (SHIM / 'swe_async_shim-0.1.dist-info').mkdir(parents=True, exist_ok=True)
+    (SHIM / 'swe_async_shim-0.1.dist-info' / 'METADATA').write_text('Metadata-Version: 2.1\\nName: swe-async-shim\\nVersion: 0.1\\n')
+    (SHIM / 'swe_async_shim-0.1.dist-info' / 'entry_points.txt').write_text('[pytest11]\\nswe_async_shim = swe_async_shim\\n')
+    (SHIM / 'swe_async_shim.py').write_text(
+        'import asyncio, inspect\\nimport pytest\\n\\n\\n@pytest.hookimpl(tryfirst=True)\\n'
+        'def pytest_pyfunc_call(pyfuncitem):\\n'
+        '    if inspect.iscoroutinefunction(pyfuncitem.obj):\\n'
+        '        args = {a: pyfuncitem.funcargs[a] for a in pyfuncitem._fixtureinfo.argnames}\\n'
+        '        asyncio.run(pyfuncitem.obj(**args))\\n'
+        '        return True\\n')
+    (SHIM / 'swe_no_cert_time.py').write_text(
+        'import ssl\\n\\n_new = ssl.SSLContext.__new__\\n\\n\\ndef _new_no_time(cls, *args, **kwargs):\\n'
+        '    ctx = _new(cls, *args, **kwargs)\\n    ctx.verify_flags |= 0x200000\\n    return ctx\\n\\n\\n'
+        'ssl.SSLContext.__new__ = staticmethod(_new_no_time)\\n')
+
+    def poetry_to_pep440(spec):
+        spec = spec if isinstance(spec, str) else spec.get('version', '')
+        m = re.fullmatch(r'\\^(\\d+)(\\.\\d+)?(\\.\\d+)?', spec.strip())
+        return f'>={spec.strip()[1:]},<{int(m.group(1)) + 1}' if m else ('' if spec.strip() == '*' else spec)
+
+    PICKS = {}
+    def setup_env(docker, sandbox_id, repo='', **kwargs):
+        tid = CURRENT['id']
+        tag = TASK_PYTHON.get(tid, NB_TAG)
+        site = Path(docker.exec(sandbox_id, 'python -c "import site; print(site.getsitepackages()[0])"').stdout.strip())
+        if tag != NB_TAG:
+            venv_dir = site.parents[2]
+            subprocess.run([str(python_for(tag)), '-m', 'venv', '--clear', '--without-pip', str(venv_dir)], check=True)
+            site = next(venv_dir.glob('lib/python3*/site-packages'))
+        ws = docker.exec(sandbox_id, 'pwd').stdout.strip()
+        base, chosen = base_for(repo, tag)
+        (site / '00_src.pth').write_text(f'{ws}/src\\n')
+        (site / '01_scorer_base.pth').write_text(f'{base}\\n')
+        (site / 'zz_workspace_paths.pth').write_text('\\n'.join(str(p) for p in Path(ws).iterdir()
+                                                               if p.is_dir() and not p.name.startswith('.')) + '\\n')
+        if tid in ASYNC_SHIM:
+            (site / '02_async_shim.pth').write_text(f'{SHIM}\\n')
+        if tid in NO_CERT_TIME:
+            (site / '03_no_cert_time.pth').write_text(f'import sys; sys.path.insert(0, {str(SHIM)!r}); import swe_no_cert_time\\n')
+        try:
+            data = tomllib.loads(Path(ws, 'pyproject.toml').read_text())
+        except Exception:
+            data = {}
+        reqs = list(data.get('project', {}).get('dependencies', []))
+        reqs += [n + poetry_to_pep440(s) for n, s in data.get('tool', {}).get('poetry', {}).get('dependencies', {}).items() if n != 'python']
+        picks, queue, seen = {}, list(reqs), set()
+        while queue:
+            try:
+                req = Requirement(queue.pop(0))
+            except Exception:
+                continue
+            key = norm(req.name)
+            if key in seen or key == OWN.get(repo) or (req.marker and not req.marker.evaluate({'extra': ''})):
+                continue
+            seen.add(key)
+            options = [(v, w) for v, w in WHEELS.get(key, []) if fits(w, tag) and req.specifier.contains(v, prereleases=True)
+                       and not (key in ONLY_FOR and repo not in ONLY_FOR[key])]
+            if options:
+                best = max(options)[1]
+                if best != chosen.get(key):
+                    picks[key] = best
+                with zipfile.ZipFile(best) as z:
+                    meta = next(n for n in z.namelist() if n.endswith('.dist-info/METADATA'))
+                    queue += [l.split(':', 1)[1].strip() for l in z.read(meta).decode().splitlines() if l.startswith('Requires-Dist:')]
+        for name, ver in CALIBRATION.get(tid, {}).items():
+            picks[name] = next(w for v, w in WHEELS[name] if str(v) == ver and fits(w, tag))
+        if picks:
+            subprocess.run([str(python_for(tag)), '-m', 'pip', 'install', '-q', '--no-index', '--no-deps', '--upgrade',
+                            '--ignore-requires-python', '--target', str(site), *map(str, picks.values())])
+        PICKS[tid] = [tag] + sorted(p.name.split('-')[0] + '==' + p.name.split('-')[1] for p in picks.values())
+
+    verification.install_test_dependencies = setup_env
+    agent_runner.install_test_dependencies = setup_env
+    print('scorer-like sandbox hook installed')
+"""),
+(CODE, """# Gold check: grade the reference patch of every selected task in this sandbox (no model needed).
+# Expect all of them to pass with SCORER_LIKE = True; a failure means the environment, not the agent, would fail that task.
+if GOLD_CHECK:
+    import asyncio as _aio, concurrent.futures as _cf
+    from swegemma.config import EvalConfig as _EC
+    from swegemma.evaluate import Evaluator as _Ev
+    from adk_eval_core.tracing import SessionTrace
+    class GoldEvaluator(_Ev):
+        async def _run_agent_sandbox(self, task, snapshot_path, task_index, total_tasks, **kwargs):
+            return task.patch, None, SessionTrace()
+    gev = GoldEvaluator(_EC(tasks_path=TASKS_PATH, snapshots_dir=DATA_DIR / 'snapshots', results_dir=WORK / 'gold_check',
+                            submission_dir=WORK, models=None, sandbox='subprocess', wheels_dir=DATA_DIR / 'wheels',
+                            graph_dir=str(DATA_DIR / 'graphs'), embeddings_dir=str(DATA_DIR / 'embeddings'),
+                            timeout_seconds=300, verification_timeout_seconds=300, display_mode='quiet'))
+    if SCORER_LIKE:
+        gev.sandbox = gev.docker = SubprocessManager(timeout_seconds=300, system_site_packages=False)
+    gold, t0 = {}, time.time()
+    with _cf.ThreadPoolExecutor(max_workers=1) as pool:
+        for t in sel:
+            CURRENT['id'] = t.instance_id
+            try:
+                gold[t.instance_id] = bool(pool.submit(_aio.run, gev.evaluate_task(task=t)).result().resolved)
+            except Exception as e:
+                gold[t.instance_id] = False; print(t.instance_id, repr(e)[:200])
+    bad = [k for k, v in gold.items() if not v]
+    print(f'gold patches pass: {sum(gold.values())}/{len(gold)} in {time.time() - t0:.0f}s; failing: {bad}')
+    (WORK / 'results').mkdir(exist_ok=True)
+    (WORK / 'results' / 'gold_check.json').write_text(json.dumps(gold, indent=1))
 """),
 (MD, "## 4. Start the model server (same settings as the scorer)"),
 (CODE, """import litellm, torch
@@ -275,7 +492,7 @@ def run_bundle(name, rep):
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / 'run_meta.json').write_text(json.dumps({
         'run_id': run_id, 'bundle': name, 'bundle_id': bid, 'mode': MODE, 'repeat': rep,
-        'model_override': MODEL_OVERRIDE, 'tasks_file_sha': task_hash, 'n_tasks': len(sel),
+        'model_override': MODEL_OVERRIDE, 'tasks_file_sha': task_hash, 'n_tasks': len(sel), 'scorer_like': SCORER_LIKE,
         'task_ids': [t.instance_id for t in sel], 'started_utc': datetime.now(timezone.utc).isoformat()}, indent=2))
 
     cfg_file = next((c for n in ('eval_config.yaml', 'eval_config.yml') if (c := AGENT_DIR / n).is_file()), None)
@@ -295,6 +512,9 @@ def run_bundle(name, rep):
         graph_dir=str(DATA_DIR / 'graphs'), embeddings_dir=str(DATA_DIR / 'embeddings'),
         wheels_dir=DATA_DIR / 'wheels', verbose=False)
     evaluator = Evaluator(eval_config)
+    if SCORER_LIKE:     # clean venv per sandbox, like the scorer image (the hook in 3b adds its packages)
+        evaluator.sandbox = evaluator.docker = SubprocessManager(timeout_seconds=int(ev.get('timeout_seconds', 300)),
+                                                                 system_site_packages=False)
 
     out = run_dir / 'runner_results.jsonl'
     done = {json.loads(l)['instance_id'] for l in out.read_text().splitlines() if l.strip()} if out.exists() else set()
@@ -306,6 +526,7 @@ def run_bundle(name, rep):
         if (time.time() - t_start) / 3600 > STOP_AFTER_HOURS:
             print('time limit reached, stopping'); break
         t0 = time.time()
+        CURRENT['id'] = task.instance_id
         try:
             result = run_sync(evaluator.evaluate_task, task=task, task_index=i, total_tasks=len(sel))
             rec = as_record(task, result, time.time() - t0)
