@@ -232,7 +232,12 @@ if SCORER_LIKE:
     def _find(pattern, what):
         hits = glob.glob(f'/kaggle/input/**/{pattern}', recursive=True)
         if not hits:
-            raise SystemExit(f'{what} not found. Add Input -> Datasets -> {what}, or set SCORER_LIKE = False.')
+            print('Inputs attached to this notebook:')
+            for q in sorted(glob.glob('/kaggle/input/*')) + sorted(glob.glob('/kaggle/input/*/*')):
+                print('  ', q)
+            raise SystemExit(f'{what} not found among the inputs above. In the right panel: Add Input -> Datasets -> '
+                             f'search "{what.split("/")[1]}" (owner {what.split("/")[0]}) -> +. Then rerun from the config cell. '
+                             'Or set SCORER_LIKE = False to grade in the plain notebook (not recommended).')
         return Path(hits[0]).parent
     EXTRA = _find('inline_snapshot-*.whl', 'zbigniewkirchner/gemma-4-agent-local-eval-wheels')
     PYDS = _find('cpython-3.12-linux.tgz.bin', 'zbigniewkirchner/gemma-4-agent-local-eval-pythons')
