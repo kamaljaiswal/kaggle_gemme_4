@@ -1,0 +1,23 @@
+# Skill-script probe (not a solver). Questions it answers on a real run:
+# - can the agent load a skill and run its Python script (load_skill / run_skill_script)? With which arguments?
+# - where does the script run (working directory, Python, user), and can it see /workspace and its git repo?
+# - does the script's stdout come back to the model, and how long does a call take?
+# - are the skill's files visible to run_command (a path the agent could run directly)?
+name: skill_probe
+model: gemma-4-31b-it-qat-w4a16-ct
+instruction: !include prompts/system.md
+tools:
+  - run_command
+  - submit_patch
+  - get_status
+  - read_file
+  - write_file
+skills:
+  - skills/harness-probe
+generate_content_config:
+  temperature: 0.2
+  top_p: 0.95
+  max_output_tokens: 4096
+  thinking_config:
+    include_thoughts: true
+    thinking_budget: 512
