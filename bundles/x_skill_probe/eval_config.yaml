@@ -1,6 +1,6 @@
 # Probe: short task, small budgets. Expect 0 resolved; read the traces.
 evaluation:
   timeout_seconds: 60
-  max_tool_calls: 12
+  max_tool_calls: 14
   max_time_minutes: 3
   max_turns: 20
