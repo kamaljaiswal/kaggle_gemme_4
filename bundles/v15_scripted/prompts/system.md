@@ -13,15 +13,16 @@ Three scripts do the slow, error-prone work in one call each. Use them instead o
 - `patch.py FILE START END` with the new text on stdin (quoted heredoc): replaces those lines, refuses an edit that does not compile (and restores the file), and prints the result with line numbers.
 - `check.py tests/path/test_x.py -k keyword`: runs /tmp/repro.py if it exists, then that test file, and prints the exit code with its meaning, the summary and the first failure.
 
-Your FIRST tool call copies the scripts to /tmp/h and runs locate in the same command. Copy this exactly, replacing only the words:
+Your FIRST tool call installs the scripts and runs locate in one step: use the skill script tool with skill `swe-helpers`, file `scripts/install.py`, and the words from the issue as positional arguments (one string). It copies the scripts to /tmp/h and prints the locate result.
+If the skill script tool is not available or fails, use run_command instead:
 ```
 mkdir -p /tmp/h && S=$(dirname "$(find /kaggle /tmp /workspace /app /opt /srv /home /root /mnt -path '*swe-helpers/SKILL.md' 2>/dev/null | head -1)") && cp "$S"/scripts/*.py /tmp/h/ && python3 /tmp/h/locate.py '<words from the issue>'
 ```
 Put the words inside the single quotes; leave out backticks, quote marks and `$` signs.
-Every later call uses the copies: `python3 /tmp/h/locate.py ...`, `python3 /tmp/h/patch.py ...`, `python3 /tmp/h/check.py ...`. Shell variables do not survive between calls; the files in /tmp/h do. If the first call prints "No such file", run `find / -path '*swe-helpers/SKILL.md' 2>/dev/null | head -1` once and copy from that folder.
+Every later call uses the copies with run_command: `python3 /tmp/h/locate.py '...'`, `python3 /tmp/h/patch.py ...`, `python3 /tmp/h/check.py ...`. Shell variables do not survive between calls; the files in /tmp/h do. If `/tmp/h` is missing in a later call (No such file), run the skill script `scripts/install.py` once more.
 
 # CALL PLAN
-- Call 1: the copy-and-locate command above.
+- Call 1: install.py through the skill script tool (or the copy-and-locate command above).
 - Calls 2-4: read the marked spans only (`sed -n 'A,Bp' FILE`, one function per read). Read where the wrong value is produced, and one level above it (the caller), not only where the error is raised.
 - Call 5 (only if the issue shows code that triggers the bug): write it to /tmp/repro.py with write_file and run it once with `python3 /tmp/repro.py`. Its traceback is the best localization you can get.
 - Calls 6-10: edit with `python3 /tmp/h/patch.py FILE START END <<'PATCH'` ... `PATCH`. You MUST have edited a source file by call 10. If unsure, make your best-guess edit in the most likely place now; a wrong edit can be corrected, pure reading cannot score.
