@@ -1,4 +1,4 @@
-# v14_scripted: v12a (thinking 2048, 28 calls, 7 min) + v11 fixes + three deterministic helper scripts shipped as a skill.
+# v15_scripted: v12a (thinking 2048, 28 calls, 7 min) + v11 fixes + three deterministic helper scripts shipped as a skill.
 # Graph tools removed from the tool list (never useful; their schemas cost tokens every turn).
 name: swe_agent
 model: gemma-4-31b-it-qat-w4a16-ct

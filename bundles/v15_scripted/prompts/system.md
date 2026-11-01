@@ -15,17 +15,20 @@ Three scripts do the slow, error-prone work in one call each. Use them instead o
 
 Your FIRST tool call copies the scripts to /tmp/h and runs locate in the same command. Copy this exactly, replacing only the words:
 ```
-mkdir -p /tmp/h && S=$(dirname "$(find /kaggle /tmp /workspace /app /opt /srv /home /root /mnt -path '*swe-helpers/SKILL.md' 2>/dev/null | head -1)") && cp "$S"/scripts/*.py /tmp/h/ && python3 /tmp/h/locate.py <words from the issue>
+mkdir -p /tmp/h && S=$(dirname "$(find /kaggle /tmp /workspace /app /opt /srv /home /root /mnt -path '*swe-helpers/SKILL.md' 2>/dev/null | head -1)") && cp "$S"/scripts/*.py /tmp/h/ && python3 /tmp/h/locate.py '<words from the issue>'
 ```
+Put the words inside the single quotes; leave out backticks, quote marks and `$` signs.
 Every later call uses the copies: `python3 /tmp/h/locate.py ...`, `python3 /tmp/h/patch.py ...`, `python3 /tmp/h/check.py ...`. Shell variables do not survive between calls; the files in /tmp/h do. If the first call prints "No such file", run `find / -path '*swe-helpers/SKILL.md' 2>/dev/null | head -1` once and copy from that folder.
 
 # CALL PLAN
 - Call 1: the copy-and-locate command above.
-- Calls 2-4: read the marked spans only (`sed -n 'A,Bp' FILE`, about 60 lines each). Read where the wrong value is produced, and one level above it (the caller), not only where the error is raised.
+- Calls 2-4: read the marked spans only (`sed -n 'A,Bp' FILE`, one function per read). Read where the wrong value is produced, and one level above it (the caller), not only where the error is raised.
 - Call 5 (only if the issue shows code that triggers the bug): write it to /tmp/repro.py with write_file and run it once with `python3 /tmp/repro.py`. Its traceback is the best localization you can get.
 - Calls 6-10: edit with `python3 /tmp/h/patch.py FILE START END <<'PATCH'` ... `PATCH`. You MUST have edited a source file by call 10. If unsure, make your best-guess edit in the most likely place now; a wrong edit can be corrected, pure reading cannot score.
 - Calls 11-20: `python3 /tmp/h/check.py`, fix, check again (at most 2 checks).
 - Call 20 onward: no new exploration. Finish with `git status --short && git diff`, then `submit_patch`.
+- If a tool result contains `budget_warning` and you have not edited yet, your very next call is a patch.py edit at your best candidate. Edits sent after the budget is gone are rejected and score zero.
+- Read with `sed -n 'A,Bp' FILE` using the line spans locate printed, one whole function per read (up to about 100 lines; tool output is cut at 5,000 characters). Do not page through a file in 50-line steps and do not grep for a `def` that locate already listed.
 
 # PROCEDURE
 

@@ -34,9 +34,11 @@ def _find_root():
 
 ROOT = _find_root()
 TOP = 5
+AUX_DIRS = {"scripts", "benchmarks", "benchmark", "examples", "example", "tools", "docs", "doc", "bin", ".github", "tests", "test"}
 STOP = set("the a an and or of to in on for is are was be it this that with as by from not if when but at into "
            "can should would does do did has have had will i we you they use used using get set new add fix bug error "
-           "issue problem expected actual behavior behaviour code like just also".split())
+           "issue problem expected actual behavior behaviour code like just also fixes fixed fixing support supports allow "
+           "allows related pull request description discussion disclaimer transcript prompt model please thanks".split())
 
 
 def tracked_py():
@@ -69,6 +71,11 @@ def split_ident(t):
 
 def main():
     query_text = " ".join(sys.argv[1:])
+    # drop PR-template boilerplate, HTML comments and URLs: they are the same in every issue and only add noise
+    query_text = re.sub(r"<!--.*?-->", " ", query_text, flags=re.S)
+    query_text = re.sub(r"https?://\S+", " ", query_text)
+    query_text = re.sub(r"(?im)^#+\s*(pull request|description|ai disclaimer|ai transcript|checklist|related issues?)\b.*$", " ", query_text)
+    query_text = re.sub(r"</?(details|summary)>", " ", query_text)
     if not query_text.strip():
         print("usage: locate.py <words from the issue>"); return
     idents = set(re.findall(r"`([^`]+)`", query_text))
@@ -84,6 +91,12 @@ def main():
                 q[p] += 0.5
 
     files = tracked_py()
+    # the importable package(s): top-level dirs (or src/<x>) holding an __init__.py
+    pkg_roots = {f.rsplit("/", 1)[0] for f in files if f.endswith("/__init__.py") and f.count("/") <= 2
+                 and f.split("/")[0] not in AUX_DIRS and not is_test(f)}
+    pkg_roots = {r for r in pkg_roots if not any(r != o and r.startswith(o + "/") for o in pkg_roots)}
+    pkg_files = {f for f in files if any(f.startswith(r + "/") for r in pkg_roots) and not is_test(f)}
+    docs_hint = bool(re.search(r"\b(docs?|documentation|tutorial|example)\b", query_text, re.I))
     docs, df = {}, collections.Counter()
     for f in files:
         try:
@@ -101,7 +114,7 @@ def main():
             df[t] += 1
     N = max(1, len(docs))
     avgdl = sum(d[2] for d in docs.values()) / N if docs else 1
-    k1, b = 1.2, 0.75
+    k1, b = 1.2, 0.5
     scores = {}
     for f, (text, tf, dl) in docs.items():
         s = 0.0
@@ -121,8 +134,13 @@ def main():
                 s += 20.0
         if is_test(f):
             s *= 0.35
+        top = f.split("/")[0]
         if f.startswith("docs_src/"):
-            s *= 0.8 if "docs" in q else 0.6
+            s *= 0.9 if docs_hint else 0.4
+        elif top in AUX_DIRS or "/" not in f or f.endswith("__main__.py"):
+            s *= 0.25        # scripts/, benchmarks/, examples/, tools/, setup.py ...: rarely the fix
+        elif f in pkg_files:
+            s *= 1.3         # the library itself
         scores[f] = s
     ranked = [f for f, s in sorted(scores.items(), key=lambda x: -x[1]) if s > 0][:TOP]
     if not ranked:
