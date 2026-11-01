@@ -5,7 +5,34 @@ Standard library only. Prints at most ~120 lines.
 """
 import ast, collections, math, os, re, subprocess, sys
 
-ROOT = os.environ.get("WORKSPACE", "/workspace")
+import os as _os, sys as _sys
+
+
+def _find_root():
+    """The repository under test. On the scorer it is /workspace; the local subprocess sandbox puts it at
+    <sandbox>/workspace and runs skill scripts from a temp copy under <sandbox>/tmp/, so walk up from both."""
+    env = _os.environ.get("WORKSPACE")
+    if env and _os.path.isdir(env):
+        return env
+    cwd = _os.getcwd()
+    if _os.path.isdir(_os.path.join(cwd, ".git")) or _os.path.isfile(_os.path.join(cwd, "pyproject.toml")):
+        return cwd
+    if _os.path.isdir("/workspace"):
+        return "/workspace"
+    for start in (cwd, _os.path.dirname(_os.path.abspath(__file__))):
+        p = start
+        for _ in range(8):
+            cand = _os.path.join(p, "workspace")
+            if _os.path.isdir(cand):
+                return cand
+            parent = _os.path.dirname(p)
+            if parent == p:
+                break
+            p = parent
+    return "/workspace"
+
+
+ROOT = _find_root()
 TOP = 5
 STOP = set("the a an and or of to in on for is are was be it this that with as by from not if when but at into "
            "can should would does do did has have had will i we you they use used using get set new add fix bug error "

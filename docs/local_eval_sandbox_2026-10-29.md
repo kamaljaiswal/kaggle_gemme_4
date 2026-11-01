@@ -32,3 +32,21 @@ Resources (Kaggle): notebook "Gemma 4 Agent: Do Gold Patches Pass Locally?" (zbi
 
 Rebuild the runner's sandbox the scorer-like way (attach the two datasets, follow his notebook), then rerun a calibration:
 gold patches should pass on about 127 tasks before any agent comparison.
+
+## First scorer-like run, 31 Oct 2026 (session 20261031_1753, 41 valid tasks, seed 1)
+
+- Gold check: 41/41 reference patches pass. The sandbox works.
+- `v12a_think2048`: 15/41 solved (37%; fastapi 5/21, rich 7/15, requests 3/4, httpx 0/1). Mean 315 s/task, p90 423 s,
+  9 tasks at the 7-minute cap, 10 empty patches. 3.59 h for 41 tasks → about 10.5 h for 120 plus startup.
+- `v14_scripted` (first version): 17/41 (fastapi 5, rich 8, requests 3, httpx 1). 13 solved by both, 2 only v12a, 4 only v14.
+  Mean 310 s. The 2-task gap is inside noise, and the scripts were NOT working in this run (see below), so this is a
+  prompt-difference comparison only.
+- `x_skill_probe` findings: `run_skill_script` works without `load_skill`, returns stdout, and runs the script from a temp
+  copy of the skill folder (cwd = that copy, not the repo). In the local subprocess sandbox `/workspace` does not exist;
+  the repo is at `<sandbox>/workspace` and `run_command` runs there (the harness translates `/workspace` in shell
+  commands, not inside Python). `run_command` can find and run the bundle's scripts directly. Shell variables do not
+  survive between calls. In the first v14 run every script call therefore failed ("no matching files", "no such file",
+  "test file not found", or `/scripts/locate.py` once `$SWE_HELPERS` was lost).
+- Fixes in v14 (bundle id 21e4fbf90baa): scripts find the repo (env, cwd, /workspace, or a `workspace` dir up the tree);
+  patch.py accepts `--from FILE`; the prompt's first call copies the scripts to /tmp/h and runs locate, and every later
+  call uses /tmp/h/<script>. Not yet run.

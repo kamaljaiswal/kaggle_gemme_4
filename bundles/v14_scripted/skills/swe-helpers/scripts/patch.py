@@ -1,6 +1,6 @@
 """patch.py: replace lines START..END (1-based, inclusive) of FILE with the text read from stdin, then compile-check.
 
-Usage (quoted heredoc so nothing is escaped):
+Usage (quoted heredoc so nothing is escaped; or --from /tmp/new.txt when stdin is not available):
     python3 patch.py FILE START END <<'PATCH'
     <new text, exactly as it should appear in the file>
     PATCH
@@ -10,20 +10,51 @@ Prints the changed region with line numbers so you can verify it.
 """
 import os, py_compile, sys
 
-ROOT = os.environ.get("WORKSPACE", "/workspace")
+import os as _os, sys as _sys
+
+
+def _find_root():
+    """The repository under test. On the scorer it is /workspace; the local subprocess sandbox puts it at
+    <sandbox>/workspace and runs skill scripts from a temp copy under <sandbox>/tmp/, so walk up from both."""
+    env = _os.environ.get("WORKSPACE")
+    if env and _os.path.isdir(env):
+        return env
+    cwd = _os.getcwd()
+    if _os.path.isdir(_os.path.join(cwd, ".git")) or _os.path.isfile(_os.path.join(cwd, "pyproject.toml")):
+        return cwd
+    if _os.path.isdir("/workspace"):
+        return "/workspace"
+    for start in (cwd, _os.path.dirname(_os.path.abspath(__file__))):
+        p = start
+        for _ in range(8):
+            cand = _os.path.join(p, "workspace")
+            if _os.path.isdir(cand):
+                return cand
+            parent = _os.path.dirname(p)
+            if parent == p:
+                break
+            p = parent
+    return "/workspace"
+
+
+ROOT = _find_root()
 
 
 def main():
-    if len(sys.argv) != 4:
-        print("usage: patch.py FILE START END  (new text on stdin)"); sys.exit(2)
-    path, start, end = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+    args = sys.argv[1:]
+    src = None
+    if "--from" in args:
+        i = args.index("--from"); src = args[i + 1]; del args[i:i + 2]
+    if len(args) != 3:
+        print("usage: patch.py FILE START END  (new text on stdin, or --from /tmp/new.txt)"); sys.exit(2)
+    path, start, end = args[0], int(args[1]), int(args[2])
     full = path if os.path.isabs(path) else os.path.join(ROOT, path)
     if not os.path.isfile(full):
         print(f"ERROR: no such file {path}"); sys.exit(2)
     base = os.path.basename(path)
     if "/tests/" in "/" + path or base.startswith("test_") or base.endswith("_test.py") or base in ("conftest.py", "pytest.ini"):
         print("ERROR: refusing to edit a test file"); sys.exit(2)
-    new = sys.stdin.read()
+    new = open(src, encoding="utf-8").read() if src else sys.stdin.read()
     if new and not new.endswith("\n"):
         new += "\n"
     with open(full, encoding="utf-8") as f:

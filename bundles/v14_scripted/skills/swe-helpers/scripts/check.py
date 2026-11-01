@@ -5,7 +5,34 @@ Prints: repro output (last 15 lines), the pytest exit code with its meaning, the
 """
 import os, re, subprocess, sys
 
-ROOT = os.environ.get("WORKSPACE", "/workspace")
+import os as _os, sys as _sys
+
+
+def _find_root():
+    """The repository under test. On the scorer it is /workspace; the local subprocess sandbox puts it at
+    <sandbox>/workspace and runs skill scripts from a temp copy under <sandbox>/tmp/, so walk up from both."""
+    env = _os.environ.get("WORKSPACE")
+    if env and _os.path.isdir(env):
+        return env
+    cwd = _os.getcwd()
+    if _os.path.isdir(_os.path.join(cwd, ".git")) or _os.path.isfile(_os.path.join(cwd, "pyproject.toml")):
+        return cwd
+    if _os.path.isdir("/workspace"):
+        return "/workspace"
+    for start in (cwd, _os.path.dirname(_os.path.abspath(__file__))):
+        p = start
+        for _ in range(8):
+            cand = _os.path.join(p, "workspace")
+            if _os.path.isdir(cand):
+                return cand
+            parent = _os.path.dirname(p)
+            if parent == p:
+                break
+            p = parent
+    return "/workspace"
+
+
+ROOT = _find_root()
 MEANING = {0: "all selected tests PASSED", 1: "a test FAILED", 2: "collection/import error or interrupted",
            4: "pytest usage error (wrong path or option)", 5: "no tests ran (bad -k keyword or path)", 124: "TIMED OUT"}
 
