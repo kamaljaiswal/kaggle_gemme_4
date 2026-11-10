@@ -1,6 +1,6 @@
 # Where Gemma 4 Coding Agents Lose Tasks: Environment, Noise, Time and Localization
 
-**Author:** Ritu Raj Patel (Synergon AI) · **Kaggle:** kamal3501 · **Code and logs:** https://github.com/kamaljaiswal/kaggle_gemme_4 · **Written:** 10 November 2026
+**Author:** Kamal Jaiswal (Synergon AI) · **Kaggle:** kamal3501 · **Code and logs:** https://github.com/kamaljaiswal/kaggle_gemme_4 · **Written:** 10 November 2026
 
 ## Abstract
 
