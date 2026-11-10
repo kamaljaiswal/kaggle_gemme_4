@@ -6,6 +6,10 @@
 
 We spent the Gemma 4 Developer Agent competition trying to improve a single-agent baseline built on `gemma-4-31b-it-qat-w4a16-ct`, and most of what we learned is about measurement rather than about agents. Four findings stand out. First, local evaluation in a plain Kaggle notebook grades most tasks wrongly: only 52 of the 129 public reference fixes pass there, while a sandbox rebuilt to match the scorer's image passes 127 (Kirchner, 2026), and all 41 of our sampled tasks. Second, the public leaderboard is coarse and noisy: one task is worth 0.017, identical submissions differ by about 2 tasks, and our four comparable bundles scored 8, 9, 9 and 10 of 58, which is one agent, not four. Third, the binding constraint is the 12-hour total, not the per-task cap: two of our bundles that kept the per-task cap timed out because more tasks used it fully. Fourth, in a correct sandbox our best bundle solves 15 of 41 tasks, and of its 26 failures, 10 never edited a file; the agent was still paging through code when its tool budget ran out. A deterministic locate script raises the rate at which the right file appears in the top five candidates from 23 to 36 of 41 offline, yet the full script bundle we built around it scored our worst result (0.10). We report the negative result, the harness facts we measured, and the tools that made the measurements possible.
 
+![Figure 1](figures/fig1_findings.png)
+
+*Figure 1. Three findings. (a) Of 129 public reference fixes, 52 pass in a plain notebook and 127 in a scorer-like sandbox. (b) v12a on 41 tasks in the corrected sandbox: 15 solved; of 26 failures, 10 never edited a file. (c) Top-k file localization of the offline locate script, by version.*
+
 ## 1. Introduction
 
 The competition asks for a coding agent, configured in YAML on top of a fixed harness, that fixes real GitHub issues. Each submission runs about 120 hidden tasks on 4×L4 GPUs with vLLM, a 32,768-token context and a 12-hour limit; a task counts only if every hidden test passes. The public leaderboard scores 58 of those tasks. Participants control the model variant, sampling settings, prompts, tool list, per-task limits (tool calls, minutes, turns, command timeout), sub-agents, skills and LoRA adapters.
@@ -60,6 +64,10 @@ Our scored submissions:
 The four comparable bundles with thought summaries on (v9, x_lb024, v11, v12a) scored 8 to 10 tasks. Under a 2-task noise floor they are statistically the same agent: none of the prompt or thinking-budget changes is detectable from one public run each. This matches a 129-task local sweep by another team, in which temperature (0.0 to 1.0), top-p, thinking budget (2,048 to 6,144), an analyzer sub-agent and the graph tools all stayed within noise, while disabling thinking (23 vs 48 of 129) or hiding thought summaries (35 vs 51) did not (Thakur, 2026). Our only bundle with summaries hidden, v3, has our second-lowest score.
 
 **Lesson.** With one submission a day, use the leaderboard to confirm that a bundle finishes and is not broken, and use paired local runs in a correct sandbox to rank bundles.
+
+![Figure 2](figures/fig2_public_scores.png)
+
+*Figure 2. Public tasks solved (of 58) by our finished submissions. The four bundles with thought summaries on lie within a 2-task band (8–10); v3 hid summaries and v15 added helper scripts.*
 
 ## 5. The 12-hour limit binds before the per-task cap
 

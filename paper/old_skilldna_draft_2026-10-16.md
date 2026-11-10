@@ -47,7 +47,7 @@ This paper makes one narrow, falsifiable claim: **a per-skill capability profile
 
 ## 3. Method
 
-![SkillLedger pipeline](PIPELINE_IMAGE)
+![SkillLedger pipeline](old_skillledger-pipeline.png)
 
 The pipeline has two halves: characterizing tasks before any attempt, and building a capability profile only from logged outcomes. Skill labels never use the gold patch or the files the agent changed, so the same labels can drive abstention on a task the agent has not seen.
 
